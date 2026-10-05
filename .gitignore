@@ -1,0 +1,5 @@
+.env
+node_modules/
+barberia.sqlite
+barberia.sqlite-shm
+barberia.sqlite-wal
