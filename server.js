@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER NOT 
 CREATE INDEX IF NOT EXISTS sales_business_date ON sales(business_id,created_at);
 CREATE INDEX IF NOT EXISTS items_sale ON sale_items(sale_id);`);
 if(!db.prepare("SELECT 1 FROM pragma_table_info('sales') WHERE name='customer_id'").get()) db.exec('ALTER TABLE sales ADD COLUMN customer_id INTEGER REFERENCES customers(id)');
+if(!db.prepare("SELECT 1 FROM pragma_table_info('sales') WHERE name='created_by_employee_id'").get()) db.exec('ALTER TABLE sales ADD COLUMN created_by_employee_id INTEGER REFERENCES employees(id)');
 if(!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='profile_photo'").get()) db.exec('ALTER TABLE users ADD COLUMN profile_photo TEXT');
 if(!db.prepare("SELECT 1 FROM pragma_table_info('customers') WHERE name='profile_photo'").get()) db.exec('ALTER TABLE customers ADD COLUMN profile_photo TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS customers_business_name ON customers(business_id,full_name); CREATE INDEX IF NOT EXISTS sales_customer_date ON sales(customer_id,created_at);');
@@ -144,7 +145,7 @@ async function route(req,res) {
     if(!admin) return send(res,403,{error:'Solo un administrador puede administrar el catálogo.'});
     db.prepare('UPDATE catalog SET active=0 WHERE id=? AND business_id=?').run(Number(path.split('/').pop()),business.id); return send(res,200,{ok:true});
   }
-  if(path==='/api/employees' && method==='GET') return send(res,200,db.prepare('SELECT e.id,e.role,u.name,u.email FROM employees e JOIN users u ON u.id=e.user_id WHERE e.business_id=? ORDER BY e.role,u.name').all(business.id));
+  if(path==='/api/employees' && method==='GET') return send(res,200,db.prepare('SELECT e.id,e.role,u.name,u.email,u.profile_photo FROM employees e JOIN users u ON u.id=e.user_id WHERE e.business_id=? ORDER BY e.role,u.name').all(business.id));
   if(path==='/api/employees' && method==='POST') {
     if(!admin) return send(res,403,{error:'Solo un administrador puede gestionar el equipo.'});
     const b=await body(req),email=String(b.email||'').trim().toLowerCase(),name=String(b.name||'').trim(),password=String(b.password||''),role=b.role==='admin'?'admin':'employee';
@@ -174,24 +175,46 @@ async function route(req,res) {
     const customerId=Number(b.customer_id)||null; if(customerId&&!db.prepare('SELECT id FROM customers WHERE id=? AND business_id=?').get(customerId,business.id)) return send(res,400,{error:'Seleccioná un cliente válido.'});
     const valid=[]; for(const item of items) { const catalog=db.prepare('SELECT id,name,type,price FROM catalog WHERE id=? AND business_id=? AND active=1').get(Number(item.id),business.id); const qty=Math.floor(Number(item.quantity)); if(catalog && qty>0) valid.push({...catalog,qty}); }
     if(valid.length!==items.length) return send(res,400,{error:'Hay productos o cantidades inválidas.'});
-    const sale=db.prepare('INSERT INTO sales(business_id,employee_id,customer,customer_id) VALUES(?,?,?,?)').run(business.id,employee.id,null,customerId);
+    const sale=db.prepare('INSERT INTO sales(business_id,employee_id,customer,customer_id,created_by_employee_id) VALUES(?,?,?,?,?)').run(business.id,employee.id,null,customerId,business.employee_id);
     const insert=db.prepare('INSERT INTO sale_items(sale_id,catalog_id,item_name,item_type,quantity,unit_price) VALUES(?,?,?,?,?,?)'); for(const i of valid) insert.run(Number(sale.lastInsertRowid),i.id,i.name,i.type,i.qty,i.price);
     return send(res,201,{id:Number(sale.lastInsertRowid)});
   }
+  if(path==='/api/sales' && method==='GET') {
+    const sales=db.prepare(`SELECT s.id,s.created_at,s.customer_id,COALESCE(c.full_name,s.customer,'Sin cliente') customer,u.name employee,COALESCE(SUM(si.quantity*si.unit_price),0) total,GROUP_CONCAT(si.item_name||' ×'||si.quantity,', ') items,(? OR COALESCE(s.created_by_employee_id,s.employee_id)=?) editable FROM sales s JOIN employees e ON e.id=s.employee_id JOIN users u ON u.id=e.user_id LEFT JOIN customers c ON c.id=s.customer_id JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? GROUP BY s.id ORDER BY s.created_at DESC`).all(admin?1:0,business.employee_id,business.id);
+    return send(res,200,sales);
+  }
+  if(path.startsWith('/api/sales/') && method==='GET') {
+    const id=Number(path.split('/').pop());
+    const sale=db.prepare(`SELECT s.id,s.created_at,s.customer_id,s.employee_id,COALESCE(c.full_name,s.customer,'Sin cliente') customer,u.name employee,(? OR COALESCE(s.created_by_employee_id,s.employee_id)=?) editable FROM sales s JOIN employees e ON e.id=s.employee_id JOIN users u ON u.id=e.user_id LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=? AND s.business_id=?`).get(admin?1:0,business.employee_id,id,business.id);
+    if(!sale) return send(res,404,{error:'Venta no encontrada.'});
+    sale.items=db.prepare('SELECT catalog_id id,item_name name,item_type type,quantity,unit_price price FROM sale_items WHERE sale_id=? ORDER BY id').all(id);
+    return send(res,200,sale);
+  }
+  if(path.startsWith('/api/sales/') && method==='PATCH') {
+    const id=Number(path.split('/').pop()),sale=db.prepare('SELECT id,employee_id,COALESCE(created_by_employee_id,employee_id) created_by_employee_id FROM sales WHERE id=? AND business_id=?').get(id,business.id);
+    if(!sale) return send(res,404,{error:'Venta no encontrada.'});
+    if(!admin&&sale.created_by_employee_id!==business.employee_id) return send(res,403,{error:'Solo quien cargó esta venta o un administrador puede modificarla.'});
+    const b=await body(req),items=Array.isArray(b.items)?b.items:[];
+    if(!items.length) return send(res,400,{error:'Agregá al menos un servicio o producto.'});
+    const employee=db.prepare('SELECT id FROM employees WHERE id=? AND business_id=?').get(admin?(Number(b.employee_id)||sale.employee_id):sale.employee_id,business.id);
+    const customerId=Number(b.customer_id)||null;
+    if(!employee) return send(res,400,{error:'Seleccioná un empleado válido.'});
+    if(customerId&&!db.prepare('SELECT id FROM customers WHERE id=? AND business_id=?').get(customerId,business.id)) return send(res,400,{error:'Seleccioná un cliente válido.'});
+    const valid=[]; for(const item of items) { const catalog=db.prepare('SELECT id,name,type,price FROM catalog WHERE id=? AND business_id=? AND active=1').get(Number(item.id),business.id); const qty=Math.floor(Number(item.quantity)); if(catalog&&qty>0) valid.push({...catalog,qty}); }
+    if(valid.length!==items.length) return send(res,400,{error:'Hay productos o cantidades inválidas.'});
+    try { db.exec('BEGIN'); db.prepare('UPDATE sales SET employee_id=?,customer_id=?,customer=NULL WHERE id=?').run(employee.id,customerId,id); db.prepare('DELETE FROM sale_items WHERE sale_id=?').run(id); const insert=db.prepare('INSERT INTO sale_items(sale_id,catalog_id,item_name,item_type,quantity,unit_price) VALUES(?,?,?,?,?,?)'); for(const item of valid) insert.run(id,item.id,item.name,item.type,item.qty,item.price); db.exec('COMMIT'); return send(res,200,{ok:true}); } catch(error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+  }
   if(path==='/api/dashboard' && method==='GET') {
-    const period=['day','week','month'].includes(url.searchParams.get('period'))?url.searchParams.get('period'):'day';
-    const cutoff=period==='day'?'start of day':period==='week'?'-6 days':'start of month';
-    const previousWhere=period==='day'
-      ? "date(s.created_at,'-3 hours')=date('now','-3 hours','-1 day')"
-      : period==='week'
-        ? "date(s.created_at,'-3 hours')>=date('now','-3 hours','-13 days') AND date(s.created_at,'-3 hours')<date('now','-3 hours','-6 days')"
-        : "date(s.created_at,'-3 hours')>=date('now','-3 hours','start of month','-1 month') AND date(s.created_at,'-3 hours')<date('now','-3 hours','start of month')";
-    const summary=db.prepare(`SELECT COALESCE(SUM(si.quantity*si.unit_price),0) revenue, COALESCE(SUM(CASE WHEN si.item_type='service' THEN si.quantity ELSE 0 END),0) services, COALESCE(SUM(CASE WHEN si.item_type='product' THEN si.quantity ELSE 0 END),0) products, COUNT(DISTINCT s.id) tickets FROM sales s LEFT JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND date(s.created_at,'-3 hours')>=date('now','-3 hours',?)`).get(business.id,cutoff);
-    const previous=db.prepare(`SELECT COALESCE(SUM(si.quantity*si.unit_price),0) revenue, COUNT(DISTINCT s.id) tickets FROM sales s LEFT JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND ${previousWhere}`).get(business.id);
-    const employees=db.prepare(`SELECT u.name,u.profile_photo,COUNT(DISTINCT s.id) tickets,COALESCE(SUM(CASE WHEN si.item_type='service' THEN si.quantity ELSE 0 END),0) services,COALESCE(SUM(CASE WHEN si.item_type='product' THEN si.quantity ELSE 0 END),0) products,COALESCE(SUM(si.quantity*si.unit_price),0) revenue FROM employees e JOIN users u ON u.id=e.user_id LEFT JOIN sales s ON s.employee_id=e.id AND date(s.created_at,'-3 hours')>=date('now','-3 hours',?) LEFT JOIN sale_items si ON si.sale_id=s.id WHERE e.business_id=? GROUP BY e.id ORDER BY revenue DESC`).all(cutoff,business.id);
-    const featured=db.prepare(`SELECT si.item_name name,si.item_type type,SUM(si.quantity) quantity,SUM(si.quantity*si.unit_price) revenue FROM sales s JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND date(s.created_at,'-3 hours')>=date('now','-3 hours',?) GROUP BY si.catalog_id ORDER BY revenue DESC`).all(business.id,cutoff);
-    const recent=db.prepare(`SELECT s.id,COALESCE(c.full_name,s.customer) customer,s.created_at,u.name employee,u.profile_photo,COALESCE(SUM(si.quantity*si.unit_price),0) total,GROUP_CONCAT(si.item_name||' ×'||si.quantity,', ') items FROM sales s JOIN employees e ON e.id=s.employee_id JOIN users u ON u.id=e.user_id LEFT JOIN customers c ON c.id=s.customer_id JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? GROUP BY s.id ORDER BY s.created_at DESC LIMIT 5`).all(business.id);
-    return send(res,200,{summary,previous,employees,featured:{services:featured.filter(item=>item.type==='service').slice(0,3),products:featured.filter(item=>item.type==='product').slice(0,3)},recent});
+    const today=new Date(Date.now()-3*60*60*1000).toISOString().slice(0,10),first=db.prepare("SELECT MIN(date(created_at,'-3 hours')) date FROM sales WHERE business_id=?").get(business.id).date||today;
+    const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value||''); let start=isDate(url.searchParams.get('start'))?url.searchParams.get('start'):today,end=isDate(url.searchParams.get('end'))?url.searchParams.get('end'):today;
+    if(start<first) start=first; if(end>today) end=today; if(start>end) return send(res,400,{error:'La fecha de inicio debe ser anterior o igual a la fecha final.'});
+    const span=Math.round((Date.parse(`${end}T00:00:00Z`)-Date.parse(`${start}T00:00:00Z`))/86400000)+1;
+    const summary=db.prepare(`SELECT COALESCE(SUM(si.quantity*si.unit_price),0) revenue, COALESCE(SUM(CASE WHEN si.item_type='service' THEN si.quantity ELSE 0 END),0) services, COALESCE(SUM(CASE WHEN si.item_type='product' THEN si.quantity ELSE 0 END),0) products, COUNT(DISTINCT s.id) tickets FROM sales s LEFT JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND date(s.created_at,'-3 hours') BETWEEN ? AND ?`).get(business.id,start,end);
+    const previous=db.prepare(`SELECT COALESCE(SUM(si.quantity*si.unit_price),0) revenue, COUNT(DISTINCT s.id) tickets FROM sales s LEFT JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND date(s.created_at,'-3 hours')>=date(?,'-' || ? || ' days') AND date(s.created_at,'-3 hours')<?`).get(business.id,start,span,start);
+    const employees=db.prepare(`SELECT u.name,u.profile_photo,COUNT(DISTINCT s.id) tickets,COALESCE(SUM(CASE WHEN si.item_type='service' THEN si.quantity ELSE 0 END),0) services,COALESCE(SUM(CASE WHEN si.item_type='product' THEN si.quantity ELSE 0 END),0) products,COALESCE(SUM(si.quantity*si.unit_price),0) revenue FROM employees e JOIN users u ON u.id=e.user_id LEFT JOIN sales s ON s.employee_id=e.id AND date(s.created_at,'-3 hours') BETWEEN ? AND ? LEFT JOIN sale_items si ON si.sale_id=s.id WHERE e.business_id=? GROUP BY e.id ORDER BY revenue DESC`).all(start,end,business.id);
+    const featured=db.prepare(`SELECT si.item_name name,si.item_type type,SUM(si.quantity) quantity,SUM(si.quantity*si.unit_price) revenue FROM sales s JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND date(s.created_at,'-3 hours') BETWEEN ? AND ? GROUP BY si.catalog_id ORDER BY revenue DESC`).all(business.id,start,end);
+    const recent=db.prepare(`SELECT s.id,COALESCE(c.full_name,s.customer) customer,s.created_at,u.name employee,u.profile_photo,COALESCE(SUM(si.quantity*si.unit_price),0) total,GROUP_CONCAT(si.item_name||' ×'||si.quantity,', ') items FROM sales s JOIN employees e ON e.id=s.employee_id JOIN users u ON u.id=e.user_id LEFT JOIN customers c ON c.id=s.customer_id JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND date(s.created_at,'-3 hours') BETWEEN ? AND ? GROUP BY s.id ORDER BY s.created_at DESC LIMIT 5`).all(business.id,start,end);
+    return send(res,200,{summary,previous,dateRange:{min:first,max:today,start,end},employees,featured:{services:featured.filter(item=>item.type==='service').slice(0,3),products:featured.filter(item=>item.type==='product').slice(0,3)},recent});
   }
   return send(res,404,{error:'No encontrado.'});
 }

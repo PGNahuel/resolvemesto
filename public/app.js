@@ -2,7 +2,7 @@ const $ = (selector, root=document) => root.querySelector(selector);
 const $$ = (selector, root=document) => [...root.querySelectorAll(selector)];
 const money = value => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(Number(value)||0);
 const defaultProfileImage='/profile-placeholder.svg';
-let me=null, business=null, catalog=[], customers=[], employees=[], cart=[], authMode='login', toastTimer, selectNewCustomer=false;
+let me=null, business=null, catalog=[], customers=[], employees=[], cart=[], editCart=[], authMode='login', toastTimer, selectNewCustomer=false;
 const adminRegistration=location.pathname==='/new/admin';
 
 async function api(path, options={}) {
@@ -32,14 +32,16 @@ async function start() {
     show('app'); await startApp();
   } catch { show('auth'); }
 }
-async function startApp() { await Promise.all([loadDashboard(),loadCatalog(),loadCustomers(),loadEmployees()]); updateBrand(); }
+async function startApp() { await Promise.all([loadDashboard(),loadCatalog(),loadCustomers(),loadEmployees(),loadSales()]); updateBrand(); }
 function updateBrand() {
   const logo=business?.logo;
   $('#logo-preview').innerHTML=logo?`<img alt="Logo" src="${logo}">`:'✦';
   $('#brand-logo-preview').innerHTML=logo?`<img alt="Logo actual" src="${logo}">`:'✦';
 }
 async function loadDashboard() {
-  const data=await api('/api/dashboard?period='+$('#period').value),s=data.summary;
+  const start=$('#date-start').value,end=$('#date-end').value;
+  const data=await api('/api/dashboard?'+new URLSearchParams({start,end})),s=data.summary;
+  $('#date-start').min=data.dateRange.min; $('#date-start').max=data.dateRange.max; $('#date-end').min=data.dateRange.min; $('#date-end').max=data.dateRange.max; $('#date-start').value=data.dateRange.start; $('#date-end').value=data.dateRange.end;
   const averageTicket=Number(s.tickets)?Number(s.revenue)/Number(s.tickets):0;
   const variation=Number(data.previous.revenue)>0?(Number(s.revenue)-Number(data.previous.revenue))/Number(data.previous.revenue):null;
   const variationText=variation===null?'Sin comparación disponible':`${variation>=0?'↑':'↓'} ${Math.abs(Math.round(variation*100))}% vs. período anterior`;
@@ -53,29 +55,34 @@ async function loadDashboard() {
 }
 async function loadCatalog() {
   catalog=await api('/api/catalog');
-  $('#item-picker').innerHTML='<option value="">Elegir servicio o producto…</option>'+catalog.map(item=>`<option value="${item.id}">${escapeHtml(item.name)} · ${item.type==='service'?'Servicio':'Producto'} · ${money(item.price)}</option>`).join('');
+  const catalogOptions=catalog.map(item=>`<option value="${item.id}">${escapeHtml(item.name)} · ${item.type==='service'?'Servicio':'Producto'} · ${money(item.price)}</option>`).join('');
+  $('#item-picker').innerHTML='<option value="">Elegir servicio o producto…</option>'+catalogOptions; $('#edit-item-picker').innerHTML='<option value="">Sumar al ticket…</option>'+catalogOptions;
   $('#catalog-list').innerHTML=catalog.length?catalog.map(item=>`<div class="catalog-item"><div class="item-symbol">${item.type==='service'?'✂':'▧'}</div><div class="catalog-info"><strong>${escapeHtml(item.name)}</strong><small>${item.type==='service'?'Servicio':'Producto'}</small></div><span class="item-price">${money(item.price)}</span>${business.role==='admin'?`<button class="delete-button" data-delete-catalog="${item.id}" title="Quitar del catálogo">×</button>`:''}</div>`).join(''):'<div class="empty-state">Agregá el primer servicio o producto.</div>';
 }
 function formatOperationDate(value) { return value ? new Date(value+'Z').toLocaleDateString('es-AR',{day:'2-digit',month:'short',year:'numeric'}) : 'Sin operaciones'; }
 async function loadCustomers() {
   customers=await api('/api/customers');
-  $('#sale-customer').innerHTML='<option value="">Sin cliente</option>'+customers.map(customer=>`<option value="${customer.id}">${escapeHtml(customer.full_name)} · #${customer.code}</option>`).join('');
+  const customerOptions='<option value="">Sin cliente</option>'+customers.map(customer=>`<option value="${customer.id}">${escapeHtml(customer.full_name)} · #${customer.code}</option>`).join('');
+  $('#sale-customer').innerHTML=customerOptions; $('#edit-sale-customer').innerHTML=customerOptions;
   const admin=business.role==='admin';
   $('#customers-list').innerHTML=customers.length?customers.map(customer=>`<div class="customer-row"><div class="customer-avatar">${customer.profile_photo?`<img src="${escapeHtml(customer.profile_photo)}" alt="">`:escapeHtml(initials(customer.full_name))}</div><div class="customer-info"><strong>${escapeHtml(customer.full_name)}</strong><small>${escapeHtml(customer.phone)} · ${escapeHtml(customer.email)}</small></div><div class="last-operation"><span>Última operación</span><strong>${formatOperationDate(customer.last_operation)}</strong></div>${admin?`<button class="button secondary edit-customer" data-edit-customer="${customer.id}">Editar</button>`:''}</div>`).join(''):'<div class="empty-state">Todavía no hay clientes registrados.</div>';
 }
 async function loadEmployees() {
   employees=await api('/api/employees');
   const active=employees.filter(item=>item.role==='employee'||item.id===business.employee_id);
-  $('#sale-employee').innerHTML=(business.role==='admin'?active:active.filter(item=>item.id===business.employee_id)).map(item=>`<option value="${item.id}" ${item.id===business.employee_id?'selected':''}>${escapeHtml(item.name)}${item.role==='admin'?' · administrador':''}</option>`).join('');
-  $('#team-list').innerHTML=employees.length?employees.map(item=>`<div class="team-row"><div class="employee-initial">${escapeHtml(item.name.slice(0,1).toUpperCase())}</div><div class="team-info"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.email)}</small></div><span class="role-chip">${item.role==='admin'?'Admin':'Empleado'}</span>${business.role==='admin'?`<button class="button secondary reset-password" data-reset-password="${item.id}">Contraseña</button>`:''}</div>`).join(''):'<div class="empty-state">Todavía no hay personas.</div>';
+  const employeeOptions=(business.role==='admin'?active:active.filter(item=>item.id===business.employee_id)).map(item=>`<option value="${item.id}" ${item.id===business.employee_id?'selected':''}>${escapeHtml(item.name)}${item.role==='admin'?' · administrador':''}</option>`).join('');
+  $('#sale-employee').innerHTML=employeeOptions; $('#edit-sale-employee').innerHTML=employeeOptions;
+  $('#team-list').innerHTML=employees.length?employees.map(item=>`<div class="team-row"><div class="employee-initial">${item.profile_photo?`<img src="${escapeHtml(item.profile_photo)}" alt="Foto de ${escapeHtml(item.name)}">`:escapeHtml(item.name.slice(0,1).toUpperCase())}</div><div class="team-info"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.email)}</small></div><span class="role-chip">${item.role==='admin'?'Admin':'Empleado'}</span>${business.role==='admin'?`<button class="button secondary reset-password" data-reset-password="${item.id}">Contraseña</button>`:''}</div>`).join(''):'<div class="empty-state">Todavía no hay personas.</div>';
   const admin=business.role==='admin'; $$('.admin-only').forEach(el=>el.classList.toggle('hidden',!admin));
-  $('#catalog-form').classList.toggle('hidden',!admin); $('#brand-form').classList.toggle('hidden',!admin); $('#team-form').classList.toggle('hidden',!admin);
+  $('#catalog-form').classList.toggle('hidden',!admin); $('#brand-form').classList.toggle('hidden',!admin); $('#team-add-panel').classList.toggle('hidden',!admin);
 }
 function renderCart() {
   $('#cart').innerHTML=cart.map(item=>`<div class="cart-row"><div>${escapeHtml(item.name)}<small>${money(item.price)} c/u</small></div><label><span class="hidden">Cantidad</span><input type="number" min="1" step="1" value="${item.quantity}" data-quantity="${item.id}"></label><strong>${money(item.price*item.quantity)}</strong><button type="button" class="remove-item" data-remove="${item.id}" aria-label="Quitar">×</button></div>`).join('');
   updateCartTotal();
 }
 function updateCartTotal() { $('#sale-total').textContent=money(cart.reduce((sum,item)=>sum+item.price*item.quantity,0)); }
+function renderEditCart() { $('#edit-cart').innerHTML=editCart.map(item=>`<div class="cart-row"><div>${escapeHtml(item.name)}<small>${money(item.price)} c/u</small></div><label><span class="hidden">Cantidad</span><input type="number" min="1" step="1" value="${item.quantity}" data-edit-quantity="${item.id}"></label><strong>${money(item.price*item.quantity)}</strong><button type="button" class="remove-item" data-edit-remove="${item.id}" aria-label="Quitar">×</button></div>`).join(''); $('#edit-sale-total').textContent=money(editCart.reduce((sum,item)=>sum+item.price*item.quantity,0)); }
+async function loadSales() { const sales=await api('/api/sales'); $('#sales-list').innerHTML=sales.length?sales.map(sale=>`<div class="sale-history-row"><div><strong>${escapeHtml(sale.customer)}</strong><small>${escapeHtml(sale.items||'')}</small></div><div><span>${escapeHtml(sale.employee)}</span><small>${new Date(sale.created_at+'Z').toLocaleString('es-AR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</small></div><strong>${money(sale.total)}</strong><button class="button secondary view-sale" data-view-sale="${sale.id}">${sale.editable?'Ver / editar':'Ver detalle'}</button></div>`).join(''):'<div class="empty-state">Todavía no hay ventas registradas.</div>'; }
 function escapeHtml(value) { return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
 
 async function resizePhoto(file) {
@@ -96,8 +103,8 @@ $('#logout').addEventListener('click',async()=>{await api('/api/logout',{method:
 $('#waiting-logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});me=null;business=null;show('auth')});
 $$('.nav-link[data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
 $$('[data-go]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.go)));
-function navigate(page) { if(page==='business'&&business.role!=='admin') return; $$('.nav-link[data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page)); $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page)); $('#page-title').textContent=({'home':'Resumen','new-sale':'Nueva venta','customers':'Clientes','catalog':'Servicios y productos','business':'Mi negocio','team':'Equipo'})[page]||'Resumen'; $('.sidebar').classList.remove('open'); if(page==='new-sale') $('#sale-customer').focus(); }
-$('#period').addEventListener('change',()=>loadDashboard().catch(error=>toast(error.message)));
+function navigate(page) { if(page==='business'&&business.role!=='admin') return; $$('.nav-link[data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page)); $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page)); $('#page-title').textContent=({'home':'Resumen','new-sale':'Nueva venta','sales':'Ventas realizadas','customers':'Clientes','catalog':'Servicios y productos','business':'Mi negocio','team':'Equipo'})[page]||'Resumen'; $('.sidebar').classList.remove('open'); if(page==='new-sale') $('#sale-customer').focus(); if(page==='sales') loadSales().catch(error=>toast(error.message)); }
+['#date-start','#date-end'].forEach(selector=>$(selector).addEventListener('change',()=>loadDashboard().catch(error=>toast(error.message))));
 const sidebar=$('.sidebar'), menuToggle=$('#menu-toggle');
 menuToggle.addEventListener('click',()=>sidebar.classList.toggle('open'));
 document.addEventListener('click',event=>{
@@ -107,7 +114,15 @@ $('#item-picker').addEventListener('change',event=>{const item=catalog.find(entr
 $('#cart').addEventListener('input',event=>{if(event.target.dataset.quantity){const item=cart.find(entry=>entry.id===Number(event.target.dataset.quantity)),quantity=Math.floor(Number(event.target.value));if(item&&quantity>0){item.quantity=quantity;event.target.closest('.cart-row').querySelector('strong').textContent=money(item.price*quantity);updateCartTotal()}}});
 $('#cart').addEventListener('change',event=>{if(event.target.dataset.quantity){const item=cart.find(entry=>entry.id===Number(event.target.dataset.quantity));if(item)event.target.value=item.quantity;}});
 $('#cart').addEventListener('click',event=>{const id=Number(event.target.dataset.remove);if(id){cart=cart.filter(item=>item.id!==id);renderCart()}});
-$('#sale-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;if(!cart.length){toast('Agregá al menos un servicio o producto.');return}const form=new FormData(formElement);try{await api('/api/sales',{method:'POST',body:JSON.stringify({customer_id:form.get('customer_id'),employee_id:form.get('employee_id'),items:cart.map(item=>({id:item.id,quantity:item.quantity}))})});formElement.reset();cart=[];renderCart();await Promise.all([loadDashboard(),loadCustomers()]);navigate('home');toast('Operación registrada.')}catch(error){toast(error.message)}});
+$('#sale-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;if(!cart.length){toast('Agregá al menos un servicio o producto.');return}const form=new FormData(formElement);try{await api('/api/sales',{method:'POST',body:JSON.stringify({customer_id:form.get('customer_id'),employee_id:form.get('employee_id'),items:cart.map(item=>({id:item.id,quantity:item.quantity}))})});formElement.reset();cart=[];renderCart();await Promise.all([loadDashboard(),loadCustomers(),loadSales()]);navigate('home');toast('Operación registrada.')}catch(error){toast(error.message)}});
+$('#edit-item-picker').addEventListener('change',event=>{const item=catalog.find(entry=>String(entry.id)===event.target.value);if(item){const existing=editCart.find(entry=>entry.id===item.id);if(existing)existing.quantity++;else editCart.push({...item,quantity:1});renderEditCart();event.target.value=''}});
+$('#edit-cart').addEventListener('input',event=>{const id=Number(event.target.dataset.editQuantity);if(id){const item=editCart.find(entry=>entry.id===id),quantity=Math.floor(Number(event.target.value));if(item&&quantity>0){item.quantity=quantity;renderEditCart()}}});
+$('#edit-cart').addEventListener('click',event=>{const id=Number(event.target.dataset.editRemove);if(id){editCart=editCart.filter(item=>item.id!==id);renderEditCart()}});
+function closeSaleModal() { $('#sale-modal').classList.add('hidden'); }
+async function openSaleModal(id) { try { const sale=await api('/api/sales/'+id),form=$('#edit-sale-form'); form.reset(); form.elements.id.value=sale.id; form.elements.customer_id.value=String(sale.customer_id||''); form.elements.employee_id.value=String(sale.employee_id); editCart=sale.items.map(item=>({...item,quantity:Number(item.quantity),price:Number(item.price)})); renderEditCart(); const editable=!!sale.editable; $('#sale-modal-title').textContent=editable?'Editar venta':'Detalle de venta'; $('#sale-modal-copy').textContent=editable?'Podés corregir cliente, persona que atendió y los ítems del ticket.':'Solo quien cargó la venta o un administrador puede modificarla.'; ['customer_id','employee_id'].forEach(name=>form.elements[name].disabled=!editable); $('#edit-item-picker').disabled=!editable; $$('#edit-cart input,#edit-cart button').forEach(element=>element.disabled=!editable); $('#edit-cart').classList.toggle('read-only',!editable); $('#edit-sale-submit').classList.toggle('hidden',!editable); $('#sale-modal').classList.remove('hidden'); } catch(error) { toast(error.message); } }
+$('#sales-list').addEventListener('click',event=>{const id=Number(event.target.dataset.viewSale);if(id)openSaleModal(id)});
+$('.close-sale-modal').addEventListener('click',closeSaleModal); $('#sale-modal').addEventListener('click',event=>{if(event.target===event.currentTarget)closeSaleModal()});
+$('#edit-sale-form').addEventListener('submit',async event=>{event.preventDefault();if(!editCart.length){toast('Agregá al menos un servicio o producto.');return}const form=new FormData(event.currentTarget);try { await api('/api/sales/'+form.get('id'),{method:'PATCH',body:JSON.stringify({customer_id:form.get('customer_id'),employee_id:form.get('employee_id'),items:editCart.map(item=>({id:item.id,quantity:item.quantity}))})}); closeSaleModal(); await Promise.all([loadDashboard(),loadCustomers(),loadSales()]); toast('Venta actualizada.'); } catch(error) { toast(error.message); }});
 $('#catalog-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);try{await api('/api/catalog',{method:'POST',body:JSON.stringify(Object.fromEntries(form))});formElement.reset();await loadCatalog();toast('Agregado al catálogo.')}catch(error){toast(error.message)}});
 $('#catalog-list').addEventListener('click',async event=>{const id=event.target.dataset.deleteCatalog;if(!id)return;try{await api('/api/catalog/'+id,{method:'DELETE'});await loadCatalog();toast('Se quitó del catálogo.')}catch(error){toast(error.message)}});
 $('#team-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;try{await api('/api/employees',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(formElement)))});formElement.reset();await loadEmployees();toast('Persona agregada al equipo.')}catch(error){toast(error.message)}});
