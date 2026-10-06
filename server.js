@@ -44,7 +44,7 @@ function businessFor(req, user) {
 async function route(req,res) {
   const url=new URL(req.url,'http://localhost'); const path=url.pathname; const method=req.method;
   if(method==='GET' && !path.startsWith('/api/')) {
-    const file=path==='/'?'index.html':path.slice(1);
+    const file=(path==='/' || path==='/new/admin')?'index.html':path.slice(1);
     if(file.includes('..')) return send(res,404,{error:'No encontrado'});
     try { const data=await readFile(join(root,'public',file)); res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream'}); return res.end(data); } catch { return send(res,404,{error:'No encontrado'}); }
   }
@@ -58,6 +58,22 @@ async function route(req,res) {
         log('registration_conflict',{request_id:req.requestId,reason:'email_already_registered',sqlite_code:error.code||null,sqlite_errno:error.errcode||null});
         return send(res,409,{error:'Ese email ya tiene una cuenta. Iniciá sesión o probá con otro email.'});
       }
+      throw error;
+    }
+  }
+  if(method==='POST' && path==='/api/admin/register') {
+    const b=await body(req); const name=String(b.name||'').trim(),email=String(b.email||'').trim().toLowerCase(),password=String(b.password||''),businessName=String(b.business_name||'').trim(),profilePhoto=b.profile_photo;
+    if(!name||!email||password.length<8||!businessName) return send(res,400,{error:'Completá tus datos, el nombre del negocio y una contraseña de al menos 8 caracteres.'});
+    if(profilePhoto!==undefined&&!validPhoto(profilePhoto)) return send(res,400,{error:'La foto de perfil no es válida o es demasiado grande.'});
+    try {
+      db.exec('BEGIN');
+      const userId=Number(db.prepare('INSERT INTO users(name,email,password_hash,profile_photo) VALUES(?,?,?,?)').run(name,email,await passwordHash(password),profilePhoto||null).lastInsertRowid);
+      const businessId=Number(db.prepare('INSERT INTO businesses(name) VALUES(?)').run(businessName).lastInsertRowid);
+      db.prepare("INSERT INTO employees(business_id,user_id,role) VALUES(?,?, 'admin')").run(businessId,userId);
+      db.exec('COMMIT'); return send(res,201,{id:userId});
+    } catch(error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      if(String(error.message).includes('UNIQUE constraint failed: users.email')) return send(res,409,{error:'Ese email ya tiene una cuenta. Iniciá sesión o usá otro email.'});
       throw error;
     }
   }
@@ -84,10 +100,13 @@ async function route(req,res) {
     db.prepare('UPDATE users SET profile_photo=? WHERE id=?').run(b.profile_photo||null,user.id);
     return send(res,200,{ok:true,profile_photo:b.profile_photo||null});
   }
-  if(path==='/api/businesses' && method==='POST') {
-    const b=await body(req); const name=String(b.name||'').trim(); if(!name) return send(res,400,{error:'Ingresá el nombre de la barbería.'});
-    const tx=db.prepare('INSERT INTO businesses(name) VALUES(?)'); const member=db.prepare("INSERT INTO employees(business_id,user_id,role) VALUES(?,?, 'admin')");
-    const result=tx.run(name); const id=Number(result.lastInsertRowid); member.run(id,user.id); return send(res,201,{id,name,role:'admin'});
+  if(path==='/api/password' && method==='PATCH') {
+    const b=await body(req),currentPassword=String(b.current_password||''),password=String(b.password||'');
+    if(password.length<8) return send(res,400,{error:'La nueva contraseña debe tener al menos 8 caracteres.'});
+    const account=db.prepare('SELECT password_hash FROM users WHERE id=?').get(user.id),[salt,hash]=account.password_hash.split(':');
+    if(!timingSafeEqual(await scrypt(currentPassword,salt,64),Buffer.from(hash,'hex'))) return send(res,400,{error:'La contraseña actual es incorrecta.'});
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(await passwordHash(password),user.id);
+    return send(res,200,{ok:true});
   }
   const business=businessFor(req,user);
   if(!business) return send(res,403,{error:'No tenés acceso a esta barbería.'});
@@ -128,9 +147,26 @@ async function route(req,res) {
   if(path==='/api/employees' && method==='GET') return send(res,200,db.prepare('SELECT e.id,e.role,u.name,u.email FROM employees e JOIN users u ON u.id=e.user_id WHERE e.business_id=? ORDER BY e.role,u.name').all(business.id));
   if(path==='/api/employees' && method==='POST') {
     if(!admin) return send(res,403,{error:'Solo un administrador puede gestionar el equipo.'});
-    const b=await body(req),email=String(b.email||'').trim().toLowerCase(),role=b.role==='admin'?'admin':'employee'; const target=db.prepare('SELECT id FROM users WHERE email=?').get(email);
-    if(!target) return send(res,404,{error:'No existe una cuenta con ese email. Pedile que se registre primero.'});
-    try { db.prepare('INSERT INTO employees(business_id,user_id,role) VALUES(?,?,?)').run(business.id,target.id,role); return send(res,201,{ok:true}); } catch { return send(res,409,{error:'Esa persona ya forma parte del equipo.'}); }
+    const b=await body(req),email=String(b.email||'').trim().toLowerCase(),name=String(b.name||'').trim(),password=String(b.password||''),role=b.role==='admin'?'admin':'employee';
+    if(!email) return send(res,400,{error:'Ingresá el email de la persona.'});
+    let target=db.prepare('SELECT id FROM users WHERE email=?').get(email);
+    try {
+      if(!target) {
+        if(!name||password.length<8) return send(res,400,{error:'Para crear una cuenta ingresá nombre y una contraseña inicial de al menos 8 caracteres.'});
+        target={id:Number(db.prepare('INSERT INTO users(name,email,password_hash) VALUES(?,?,?)').run(name,email,await passwordHash(password)).lastInsertRowid)};
+      }
+      db.prepare('INSERT INTO employees(business_id,user_id,role) VALUES(?,?,?)').run(business.id,target.id,role);
+      return send(res,201,{ok:true,created:!!name});
+    } catch(error) { if(String(error.message).includes('UNIQUE constraint failed: employees.business_id, employees.user_id')) return send(res,409,{error:'Esa persona ya forma parte del equipo.'}); throw error; }
+  }
+  if(path.startsWith('/api/employees/') && path.endsWith('/password') && method==='PATCH') {
+    if(!admin) return send(res,403,{error:'Solo un administrador puede cambiar contraseñas del equipo.'});
+    const employeeId=Number(path.split('/')[3]),b=await body(req),password=String(b.password||'');
+    if(!Number.isInteger(employeeId)||password.length<8) return send(res,400,{error:'La contraseña debe tener al menos 8 caracteres.'});
+    const target=db.prepare('SELECT user_id FROM employees WHERE id=? AND business_id=?').get(employeeId,business.id);
+    if(!target) return send(res,404,{error:'La persona no forma parte de este negocio.'});
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(await passwordHash(password),target.user_id);
+    return send(res,200,{ok:true});
   }
   if(path==='/api/sales' && method==='POST') {
     const b=await body(req); const items=Array.isArray(b.items)?b.items:[]; if(!items.length) return send(res,400,{error:'Agregá al menos un servicio o producto.'});

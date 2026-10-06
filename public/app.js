@@ -3,6 +3,7 @@ const $$ = (selector, root=document) => [...root.querySelectorAll(selector)];
 const money = value => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(Number(value)||0);
 const defaultProfileImage='/profile-placeholder.svg';
 let me=null, business=null, catalog=[], customers=[], employees=[], cart=[], authMode='login', toastTimer, selectNewCustomer=false;
+const adminRegistration=location.pathname==='/new/admin';
 
 async function api(path, options={}) {
   const headers={'content-type':'application/json',...(options.headers||{})};
@@ -13,14 +14,19 @@ async function api(path, options={}) {
   return data;
 }
 function toast(message) { const el=$('#toast'); el.textContent=message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),3000); }
-function show(id) { ['auth','setup','app'].forEach(name=>$('#'+name).classList.toggle('hidden',name!==id)); }
+function show(id) { ['auth','waiting','app'].forEach(name=>$('#'+name).classList.toggle('hidden',name!==id)); }
 function initials(name) { return String(name||'').trim().slice(0,1).toUpperCase()||'·'; }
 function setPhoto(element, photo, fallback='+') { element.replaceChildren(); if(photo) { const image=document.createElement('img'); image.src=photo; image.alt='Foto de perfil'; element.append(image); } else element.textContent=fallback; }
-function setAuthMode(mode) { authMode=mode; $$('.tab').forEach(tab=>tab.classList.toggle('active',tab.dataset.auth===mode)); $('#name-field').classList.toggle('hidden',mode!=='register'); $('#auth-photo-field').classList.toggle('hidden',mode!=='register'); $('#auth-submit').textContent=mode==='register'?'Crear usuario':'Ingresar'; }
+function setAuthMode(mode) {
+  authMode=mode; const registering=mode==='register'||mode==='admin-register';
+  $$('.tab').forEach(tab=>tab.classList.toggle('active',tab.dataset.auth===mode));
+  $('#name-field').classList.toggle('hidden',!registering); $('#auth-photo-field').classList.toggle('hidden',!registering); $('#business-name-field').classList.toggle('hidden',mode!=='admin-register');
+  $('#auth-submit').textContent=registering?(mode==='admin-register'?'Crear negocio y cuenta':'Crear usuario'):'Ingresar';
+}
 function selectBusiness(next) { business=next; localStorage.setItem('ritual-business',String(next.id)); $('#top-name').textContent=next.name; $('#top-role').textContent=next.role==='admin'?'Administración':'Equipo'; $('#brand-name').value=next.name; $('#business-picker').innerHTML=''; }
 async function start() {
   try { const data=await api('/api/me'); me=data.user; $('#profile-name').textContent=me.name; $('#profile-email').textContent=me.email; setPhoto($('#avatar'),me.profile_photo,initials(me.name));
-    if(!data.businesses.length) { show('setup'); return; }
+    if(!data.businesses.length) { show('waiting'); return; }
     const saved=localStorage.getItem('ritual-business'); selectBusiness(data.businesses.find(x=>String(x.id)===saved)||data.businesses[0]);
     if(data.businesses.length>1) { const pick=document.createElement('select'); pick.className='business-select'; pick.setAttribute('aria-label','Elegir espacio'); data.businesses.forEach(item=>{const option=document.createElement('option');option.value=item.id;option.textContent=item.name;option.selected=item.id===business.id;pick.append(option)}); pick.addEventListener('change',()=>{selectBusiness(data.businesses.find(x=>String(x.id)===pick.value));startApp()}); $('#business-picker').append(pick); }
     show('app'); await startApp();
@@ -55,7 +61,7 @@ async function loadEmployees() {
   employees=await api('/api/employees');
   const active=employees.filter(item=>item.role==='employee'||item.id===business.employee_id);
   $('#sale-employee').innerHTML=(business.role==='admin'?active:active.filter(item=>item.id===business.employee_id)).map(item=>`<option value="${item.id}" ${item.id===business.employee_id?'selected':''}>${escapeHtml(item.name)}${item.role==='admin'?' · administrador':''}</option>`).join('');
-  $('#team-list').innerHTML=employees.length?employees.map(item=>`<div class="team-row"><div class="employee-initial">${escapeHtml(item.name.slice(0,1).toUpperCase())}</div><div class="team-info"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.email)}</small></div><span class="role-chip">${item.role==='admin'?'Admin':'Empleado'}</span></div>`).join(''):'<div class="empty-state">Todavía no hay personas.</div>';
+  $('#team-list').innerHTML=employees.length?employees.map(item=>`<div class="team-row"><div class="employee-initial">${escapeHtml(item.name.slice(0,1).toUpperCase())}</div><div class="team-info"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.email)}</small></div><span class="role-chip">${item.role==='admin'?'Admin':'Empleado'}</span>${business.role==='admin'?`<button class="button secondary reset-password" data-reset-password="${item.id}">Contraseña</button>`:''}</div>`).join(''):'<div class="empty-state">Todavía no hay personas.</div>';
   const admin=business.role==='admin'; $$('.admin-only').forEach(el=>el.classList.toggle('hidden',!admin));
   $('#catalog-form').classList.toggle('hidden',!admin); $('#brand-form').classList.toggle('hidden',!admin); $('#team-form').classList.toggle('hidden',!admin);
 }
@@ -78,9 +84,9 @@ connectPhotoInputs({file:$('#auth-photo-file'),camera:$('#auth-photo-camera'),pr
 connectPhotoInputs({file:$('#customer-photo-file'),camera:$('#customer-photo-camera'),preview:$('#customer-photo-preview'),target:$('#customer-form').elements.profile_photo});
 connectPhotoInputs({file:$('#profile-photo-file'),camera:$('#profile-photo-camera'),preview:$('#profile-photo-preview'),target:$('#profile-form').elements.profile_photo,fallback:initials('')});
 $$('.tab').forEach(tab=>tab.addEventListener('click',()=>setAuthMode(tab.dataset.auth)));
-$('#auth-form').addEventListener('submit',async event=>{event.preventDefault(); const formElement=event.currentTarget; const form=new FormData(formElement); const data=Object.fromEntries(form); try { if(authMode==='register') await api('/api/register',{method:'POST',body:JSON.stringify(data)}); await api('/api/login',{method:'POST',body:JSON.stringify({email:data.email,password:data.password})}); formElement.reset(); setPhoto($('#auth-photo-preview'),null); await start(); } catch(error) { toast(error.message); } });
-$('#business-form').addEventListener('submit',async event=>{event.preventDefault(); const formElement=event.currentTarget; try { const result=await api('/api/businesses',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(formElement)))}); localStorage.setItem('ritual-business',String(result.id)); formElement.reset(); await start(); toast('Tu espacio ya está listo.'); } catch(error) { toast(error.message); } });
+$('#auth-form').addEventListener('submit',async event=>{event.preventDefault(); const formElement=event.currentTarget; const form=new FormData(formElement); const data=Object.fromEntries(form); try { if(authMode==='register') await api('/api/register',{method:'POST',body:JSON.stringify(data)}); if(authMode==='admin-register') await api('/api/admin/register',{method:'POST',body:JSON.stringify(data)}); await api('/api/login',{method:'POST',body:JSON.stringify({email:data.email,password:data.password})}); formElement.reset(); setPhoto($('#auth-photo-preview'),null); await start(); } catch(error) { toast(error.message); } });
 $('#logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});localStorage.removeItem('ritual-business');me=null;business=null;show('auth')});
+$('#waiting-logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});me=null;business=null;show('auth')});
 $$('.nav-link[data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
 $$('[data-go]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.go)));
 function navigate(page) { if(page==='business'&&business.role!=='admin') return; $$('.nav-link[data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page)); $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page)); $('#page-title').textContent=({'home':'Resumen','new-sale':'Nueva venta','customers':'Clientes','catalog':'Servicios y productos','business':'Mi negocio','team':'Equipo'})[page]||'Resumen'; $('.sidebar').classList.remove('open'); if(page==='new-sale') $('#sale-customer').focus(); }
@@ -93,6 +99,7 @@ $('#sale-form').addEventListener('submit',async event=>{event.preventDefault();c
 $('#catalog-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);try{await api('/api/catalog',{method:'POST',body:JSON.stringify(Object.fromEntries(form))});formElement.reset();await loadCatalog();toast('Agregado al catálogo.')}catch(error){toast(error.message)}});
 $('#catalog-list').addEventListener('click',async event=>{const id=event.target.dataset.deleteCatalog;if(!id)return;try{await api('/api/catalog/'+id,{method:'DELETE'});await loadCatalog();toast('Se quitó del catálogo.')}catch(error){toast(error.message)}});
 $('#team-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;try{await api('/api/employees',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(formElement)))});formElement.reset();await loadEmployees();toast('Persona agregada al equipo.')}catch(error){toast(error.message)}});
+$('#team-list').addEventListener('click',async event=>{const employeeId=Number(event.target.dataset.resetPassword);if(!employeeId)return;const password=prompt('Nueva contraseña (mínimo 8 caracteres):');if(password===null)return;try { await api(`/api/employees/${employeeId}/password`,{method:'PATCH',body:JSON.stringify({password})}); toast('Contraseña actualizada.'); } catch(error) { toast(error.message); }});
 $('#brand-form').addEventListener('submit',async event=>{event.preventDefault();const form=new FormData(event.currentTarget),file=form.get('logo');const save=async logo=>{await api('/api/business',{method:'PATCH',body:JSON.stringify({name:form.get('name'),logo})});business.name=form.get('name');business.logo=logo;$('#top-name').textContent=business.name;updateBrand();toast('Datos del espacio guardados.')};try{if(file?.size){if(file.size>1_000_000)throw new Error('El logo debe pesar menos de 1 MB.');const reader=new FileReader();reader.onload=()=>save(reader.result).catch(error=>toast(error.message));reader.readAsDataURL(file)}else await save(business.logo||'')}catch(error){toast(error.message)}});
 function openCustomerModal(customer=null, selectAfterCreate=false) { const form=$('#customer-form'); selectNewCustomer=selectAfterCreate; form.reset(); form.elements.id.value=customer?.id||''; form.elements.profile_photo.value=customer?.profile_photo||''; setPhoto($('#customer-photo-preview'),customer?.profile_photo,initials(customer?.full_name)); form.elements.full_name.value=customer?.full_name||''; form.elements.phone.value=customer?.phone||''; form.elements.email.value=customer?.email||''; $('#customer-modal-title').textContent=customer?'Editar cliente':'Nuevo cliente'; $('#customer-modal-copy').textContent=customer?'Actualizá sus datos de contacto y su foto de perfil.':'Completá sus datos para registrarlo.'; $('#customer-modal').classList.remove('hidden'); form.elements.full_name.focus(); }
 function closeCustomerModal() { $('#customer-modal').classList.add('hidden'); }
@@ -107,5 +114,8 @@ function closeProfileModal() { $('#profile-modal').classList.add('hidden'); }
 $('#edit-profile').addEventListener('click',openProfileModal);
 $('.close-profile-modal').addEventListener('click',closeProfileModal);
 $('#profile-modal').addEventListener('click',event=>{if(event.target===event.currentTarget)closeProfileModal()});
-$('#profile-form').addEventListener('submit',async event=>{event.preventDefault();try { const profile_photo=event.currentTarget.elements.profile_photo.value; await api('/api/profile',{method:'PATCH',body:JSON.stringify({profile_photo})}); me.profile_photo=profile_photo||null; setPhoto($('#avatar'),me.profile_photo,initials(me.name)); closeProfileModal(); toast('Foto de perfil actualizada.'); } catch(error) { toast(error.message); }});
+$('#profile-form').addEventListener('submit',async event=>{event.preventDefault();try { const form=event.currentTarget,profile_photo=form.elements.profile_photo.value,password=form.elements.password.value,currentPassword=form.elements.current_password.value; if(password||currentPassword) await api('/api/password',{method:'PATCH',body:JSON.stringify({current_password:currentPassword,password})}); await api('/api/profile',{method:'PATCH',body:JSON.stringify({profile_photo})}); me.profile_photo=profile_photo||null; setPhoto($('#avatar'),me.profile_photo,initials(me.name)); form.elements.password.value='';form.elements.current_password.value='';closeProfileModal();toast('Perfil actualizado.'); } catch(error) { toast(error.message); }});
+if(adminRegistration) {
+  $$('.auth-tabs').forEach(el=>el.classList.add('hidden')); $('#auth-eyebrow').textContent='ALTA ADMINISTRATIVA'; $('#auth-title').innerHTML='Creá tu negocio,<br>en orden.'; $('#auth-copy').textContent='Esta es la única vía para crear un negocio y su cuenta administradora.'; setAuthMode('admin-register');
+} else setAuthMode('login');
 start();
