@@ -67,8 +67,9 @@ async function loadEmployees() {
 }
 function renderCart() {
   $('#cart').innerHTML=cart.map(item=>`<div class="cart-row"><div>${escapeHtml(item.name)}<small>${money(item.price)} c/u</small></div><label><span class="hidden">Cantidad</span><input type="number" min="1" step="1" value="${item.quantity}" data-quantity="${item.id}"></label><strong>${money(item.price*item.quantity)}</strong><button type="button" class="remove-item" data-remove="${item.id}" aria-label="Quitar">×</button></div>`).join('');
-  $('#sale-total').textContent=money(cart.reduce((sum,item)=>sum+item.price*item.quantity,0));
+  updateCartTotal();
 }
+function updateCartTotal() { $('#sale-total').textContent=money(cart.reduce((sum,item)=>sum+item.price*item.quantity,0)); }
 function escapeHtml(value) { return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
 
 async function resizePhoto(file) {
@@ -93,7 +94,8 @@ function navigate(page) { if(page==='business'&&business.role!=='admin') return;
 $('#period').addEventListener('change',()=>loadDashboard().catch(error=>toast(error.message)));
 $('#menu-toggle').addEventListener('click',()=>$('.sidebar').classList.toggle('open'));
 $('#item-picker').addEventListener('change',event=>{const item=catalog.find(entry=>String(entry.id)===event.target.value);if(item){const existing=cart.find(entry=>entry.id===item.id);if(existing)existing.quantity++;else cart.push({...item,quantity:1});renderCart();event.target.value=''}});
-$('#cart').addEventListener('input',event=>{if(event.target.dataset.quantity){const item=cart.find(entry=>entry.id===Number(event.target.dataset.quantity));if(item)item.quantity=Math.max(1,Math.floor(Number(event.target.value)||1));renderCart()}});
+$('#cart').addEventListener('input',event=>{if(event.target.dataset.quantity){const item=cart.find(entry=>entry.id===Number(event.target.dataset.quantity)),quantity=Math.floor(Number(event.target.value));if(item&&quantity>0){item.quantity=quantity;event.target.closest('.cart-row').querySelector('strong').textContent=money(item.price*quantity);updateCartTotal()}}});
+$('#cart').addEventListener('change',event=>{if(event.target.dataset.quantity){const item=cart.find(entry=>entry.id===Number(event.target.dataset.quantity));if(item)event.target.value=item.quantity;}});
 $('#cart').addEventListener('click',event=>{const id=Number(event.target.dataset.remove);if(id){cart=cart.filter(item=>item.id!==id);renderCart()}});
 $('#sale-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;if(!cart.length){toast('Agregá al menos un servicio o producto.');return}const form=new FormData(formElement);try{await api('/api/sales',{method:'POST',body:JSON.stringify({customer_id:form.get('customer_id'),employee_id:form.get('employee_id'),items:cart.map(item=>({id:item.id,quantity:item.quantity}))})});formElement.reset();cart=[];renderCart();await Promise.all([loadDashboard(),loadCustomers()]);navigate('home');toast('Operación registrada.')}catch(error){toast(error.message)}});
 $('#catalog-form').addEventListener('submit',async event=>{event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);try{await api('/api/catalog',{method:'POST',body:JSON.stringify(Object.fromEntries(form))});formElement.reset();await loadCatalog();toast('Agregado al catálogo.')}catch(error){toast(error.message)}});
