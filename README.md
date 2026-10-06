@@ -49,3 +49,16 @@ El registro de productos no administra inventario. El MVP tampoco incluye proces
 - La API aplica headers defensivos, validación de origen y límites de tamaño.
 
 La suite usa una base SQLite temporal y cubre alta de negocio, emails normalizados, usuario independiente y vinculación, permisos por rol, creación/edición/anulación de ventas, auditoría, rate limiting, invalidación de sesiones y aislamiento entre negocios.
+
+## Arquitectura
+
+El backend está separado por responsabilidad:
+
+- `server.js`: composición de dependencias, headers HTTP, logging y ciclo de vida del proceso.
+- `src/handler.js`: routing HTTP, lectura de requests, cookies y códigos de respuesta.
+- `src/service.js`: validaciones, permisos, reglas de negocio y transacciones.
+- `src/repository.js`: único punto de acceso SQL y mapeo de datos.
+- `src/database.js`: creación y migraciones de SQLite.
+- `src/security.js`: hashing de contraseñas y tokens de sesión.
+
+El flujo de dependencias es unidireccional: `handler → service → repository`. El service y el repository no conocen objetos HTTP.

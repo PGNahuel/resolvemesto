@@ -103,3 +103,26 @@ test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',asy
   const limited=await attacker.request('/api/login',{method:'POST',body:{email:'eva@example.com',password:'incorrecta'}});
   assert.equal(limited.status,429); assert.ok(Number(limited.headers.get('retry-after'))>0);
 });
+
+test('rutas CRUD conservan sus contratos después de separar las capas',async t=>{
+  const server=await startServer();
+  t.after(async()=>{ server.child.kill('SIGTERM'); await new Promise(resolve=>server.child.once('exit',resolve)); await rm(server.directory,{recursive:true,force:true}); });
+  const page=await fetch(server.url+'/'); assert.equal(page.status,200); assert.match(await page.text(),/<title>Ritual/);
+  const admin=client(server.url),business=await registerAdmin(admin,{name:'Admin CRUD',email:'crud@example.com',password:'CrudSeguro!2026',business:'Nombre inicial'});
+
+  assert.equal((await admin.request('/api/business',{method:'PATCH',businessId:business.id,body:{name:'Nombre actualizado',logo:''}})).status,200);
+  assert.equal((await admin.request('/api/me')).data.businesses[0].name,'Nombre actualizado');
+  assert.equal((await admin.request('/api/profile',{method:'PATCH',body:{profile_photo:''}})).status,200);
+
+  const customer=await admin.request('/api/customers',{method:'POST',businessId:business.id,body:{full_name:'Cliente Uno',phone:'11 5555 5555',email:'cliente@example.com',profile_photo:''}});
+  assert.equal(customer.status,201);
+  assert.equal((await admin.request(`/api/customers/${customer.data.id}`,{method:'PATCH',businessId:business.id,body:{full_name:'Cliente Editado',phone:'11 4444 4444',email:'cliente@example.com',profile_photo:''}})).status,200);
+  assert.equal((await admin.request('/api/customers',{businessId:business.id})).data[0].full_name,'Cliente Editado');
+
+  const item=await admin.request('/api/catalog',{method:'POST',businessId:business.id,body:{name:'Barba',type:'service',price:7000}});
+  assert.equal(item.status,201);
+  assert.equal((await admin.request(`/api/catalog/${item.data.id}`,{method:'DELETE',businessId:business.id})).status,200);
+  const catalog=await admin.request('/api/catalog',{businessId:business.id});
+  assert.equal(catalog.data.find(entry=>entry.id===item.data.id).active,0);
+  assert.equal((await admin.request(`/api/employees/${business.employee_id}/password`,{method:'PATCH',businessId:business.id,body:{password:'NoPermitida!2026'}})).status,403);
+});
