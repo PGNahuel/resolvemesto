@@ -23,6 +23,7 @@ if(!db.prepare("SELECT 1 FROM pragma_table_info('sales') WHERE name='customer_id
 if(!db.prepare("SELECT 1 FROM pragma_table_info('sales') WHERE name='created_by_employee_id'").get()) db.exec('ALTER TABLE sales ADD COLUMN created_by_employee_id INTEGER REFERENCES employees(id)');
 if(!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='profile_photo'").get()) db.exec('ALTER TABLE users ADD COLUMN profile_photo TEXT');
 if(!db.prepare("SELECT 1 FROM pragma_table_info('customers') WHERE name='profile_photo'").get()) db.exec('ALTER TABLE customers ADD COLUMN profile_photo TEXT');
+if(!db.prepare("SELECT 1 FROM pragma_table_info('catalog') WHERE name='photo'").get()) db.exec('ALTER TABLE catalog ADD COLUMN photo TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS customers_business_name ON customers(business_id,full_name); CREATE INDEX IF NOT EXISTS sales_customer_date ON sales(customer_id,created_at);');
 
 const mime = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.svg':'image/svg+xml' };
@@ -118,7 +119,7 @@ async function route(req,res) {
     if(typeof b.logo==='string' && (b.logo==='' || (b.logo.startsWith('data:image/') && b.logo.length<1_500_000))) db.prepare('UPDATE businesses SET logo=? WHERE id=?').run(b.logo||null,business.id);
     return send(res,200,{ok:true});
   }
-  if(path==='/api/catalog' && method==='GET') return send(res,200,db.prepare('SELECT id,type,name,price FROM catalog WHERE business_id=? AND active=1 ORDER BY type,name').all(business.id));
+  if(path==='/api/catalog' && method==='GET') return send(res,200,db.prepare(`SELECT id,type,name,price,active,photo FROM catalog WHERE business_id=? ${admin?'':'AND active=1'} ORDER BY active DESC,type,name`).all(business.id));
   if(path==='/api/customers' && method==='GET') return send(res,200,db.prepare(`SELECT c.id,c.full_name,c.phone,c.email,c.profile_photo,MAX(s.created_at) last_operation FROM customers c LEFT JOIN sales s ON s.customer_id=c.id WHERE c.business_id=? GROUP BY c.id ORDER BY c.full_name COLLATE NOCASE`).all(business.id).map(customer=>({...customer,email:customer.email.endsWith('@ritual.internal')?'':customer.email,code:String(customer.id).padStart(5,'0')})));
   if(path==='/api/customers' && method==='POST') {
     const b=await body(req),fullName=String(b.full_name||'').trim(),phone=String(b.phone||'').trim(),email=String(b.email||'').trim().toLowerCase(),profilePhoto=b.profile_photo;
@@ -137,9 +138,31 @@ async function route(req,res) {
   }
   if(path==='/api/catalog' && method==='POST') {
     if(!admin) return send(res,403,{error:'Solo un administrador puede administrar el catálogo.'});
-    const b=await body(req),name=String(b.name||'').trim(),price=Math.round(Number(b.price));
+    const b=await body(req),name=String(b.name||'').trim(),price=Math.round(Number(b.price)),photo=b.photo;
     if(!name||!['service','product'].includes(b.type)||!Number.isFinite(price)||price<0) return send(res,400,{error:'Revisá nombre, tipo y precio.'});
-    const result=db.prepare('INSERT INTO catalog(business_id,type,name,price) VALUES(?,?,?,?)').run(business.id,b.type,name,price); return send(res,201,{id:Number(result.lastInsertRowid)});
+    if(photo!==undefined&&!validPhoto(photo)) return send(res,400,{error:'La foto no es válida o es demasiado grande.'});
+    if(db.prepare('SELECT id FROM catalog WHERE business_id=? AND type=? AND lower(name)=lower(?)').get(business.id,b.type,name)) return send(res,409,{error:'Ya existe un producto o servicio con ese nombre.'});
+    const result=db.prepare('INSERT INTO catalog(business_id,type,name,price,photo) VALUES(?,?,?,?,?)').run(business.id,b.type,name,price,photo||null); return send(res,201,{id:Number(result.lastInsertRowid)});
+  }
+  if(path.startsWith('/api/catalog/') && path.endsWith('/history-impact') && method==='GET') {
+    if(!admin) return send(res,403,{error:'Solo un administrador puede consultar este impacto.'});
+    const id=Number(path.split('/')[3]),start=String(url.searchParams.get('start')||''),end=String(url.searchParams.get('end')||''),isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value);
+    if(!isDate(start)||!isDate(end)||start>end) return send(res,400,{error:'Elegí un período válido.'});
+    const item=db.prepare('SELECT id,name,type FROM catalog WHERE id=? AND business_id=?').get(id,business.id);
+    if(!item) return send(res,404,{error:'Producto o servicio no encontrado.'});
+    const impact=db.prepare(`SELECT COUNT(DISTINCT s.id) sales,COUNT(si.id) items FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE si.catalog_id=? AND s.business_id=? AND date(s.created_at,'-3 hours') BETWEEN ? AND ?`).get(id,business.id,start,end);
+    return send(res,200,{...item,sales:Number(impact.sales),items:Number(impact.items),start,end});
+  }
+  if(path.startsWith('/api/catalog/') && method==='PATCH') {
+    if(!admin) return send(res,403,{error:'Solo un administrador puede modificar el catálogo.'});
+    const id=Number(path.split('/').pop()),current=db.prepare('SELECT id,type FROM catalog WHERE id=? AND business_id=?').get(id,business.id),b=await body(req),name=String(b.name||'').trim(),price=Math.round(Number(b.price)),active=b.active?1:0,photo=b.photo;
+    if(!current) return send(res,404,{error:'Producto o servicio no encontrado.'});
+    if(!name||!Number.isFinite(price)||price<0) return send(res,400,{error:'Revisá nombre y precio.'});
+    if(photo!==undefined&&!validPhoto(photo)) return send(res,400,{error:'La foto no es válida o es demasiado grande.'});
+    if(db.prepare('SELECT id FROM catalog WHERE business_id=? AND type=? AND lower(name)=lower(?) AND id<>?').get(business.id,current.type,name,id)) return send(res,409,{error:'Ya existe un producto o servicio con ese nombre.'});
+    const applyPrice=!!b.apply_price_to_history,start=String(b.history_start||''),end=String(b.history_end||''),isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value);
+    if(applyPrice&&(!isDate(start)||!isDate(end)||start>end)) return send(res,400,{error:'Elegí un período válido para actualizar precios históricos.'});
+    try { db.exec('BEGIN'); db.prepare('UPDATE catalog SET name=?,price=?,active=?,photo=? WHERE id=? AND business_id=?').run(name,price,active,photo||null,id,business.id); let affected=0; if(applyPrice) affected=Number(db.prepare(`UPDATE sale_items SET unit_price=? WHERE catalog_id=? AND sale_id IN (SELECT id FROM sales WHERE business_id=? AND date(created_at,'-3 hours') BETWEEN ? AND ?)`).run(price,id,business.id,start,end).changes); db.exec('COMMIT'); return send(res,200,{ok:true,affected}); } catch(error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
   }
   if(path.startsWith('/api/catalog/') && method==='DELETE') {
     if(!admin) return send(res,403,{error:'Solo un administrador puede administrar el catálogo.'});
