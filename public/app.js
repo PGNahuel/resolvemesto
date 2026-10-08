@@ -115,13 +115,38 @@ $('#auth-form').addEventListener('submit',async event=>{event.preventDefault(); 
 $('#logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});localStorage.removeItem('ritual-business');me=null;business=null;show('auth')});
 $('#waiting-logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});me=null;business=null;show('auth')});
 $$('.nav-link[data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
+$$('.mobile-dock [data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
+const themeToggle=$('.theme-toggle');
+function setTheme(theme){document.documentElement.dataset.theme=theme;localStorage.setItem('ritual-theme',theme);const dark=theme==='dark';themeToggle.setAttribute('aria-label',dark?'Activar modo claro':'Activar modo oscuro');themeToggle.innerHTML=`${dark?'☀':'☾'} <span class="theme-label">Modo ${dark?'claro':'oscuro'}</span>`;}
+setTheme(localStorage.getItem('ritual-theme')||'light');
+themeToggle.addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
 $$('[data-go]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.go)));
-function navigate(page) { if(['business','audit'].includes(page)&&business.role!=='admin') return; $$('.nav-link[data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page)); $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page)); $('#page-title').textContent=({'home':'Resumen','new-sale':'Nueva venta','sales':'Ventas realizadas','customers':'Clientes','catalog':'Servicios y productos','business':'Mi negocio','team':'Equipo','audit':'Auditoría'})[page]||'Resumen'; $('.sidebar').classList.remove('open'); menuToggle.setAttribute('aria-expanded','false'); if(page==='new-sale') $('#sale-customer').focus(); if(page==='sales') loadSales().catch(error=>toast(error.message,'error')); if(page==='audit')loadAudit().catch(error=>toast(error.message,'error')); }
+function navigate(page) { if(['business','audit'].includes(page)&&business.role!=='admin') return; $$('.nav-link[data-page],.mobile-dock [data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page)); $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page)); $('#page-title').textContent=({'home':'Resumen','new-sale':'Nueva venta','sales':'Ventas realizadas','customers':'Clientes','catalog':'Servicios y productos','business':'Mi negocio','team':'Equipo','audit':'Auditoría'})[page]||'Resumen'; $('.sidebar').classList.remove('open'); menuToggle.setAttribute('aria-expanded','false'); if(page==='new-sale') $('#sale-customer').focus(); if(page==='sales') loadSales().catch(error=>toast(error.message,'error')); if(page==='audit')loadAudit().catch(error=>toast(error.message,'error')); }
 ['#date-start','#date-end'].forEach(selector=>$(selector).addEventListener('change',()=>loadDashboard().catch(error=>toast(error.message))));
 const sidebar=$('.sidebar'), menuToggle=$('#menu-toggle');
-menuToggle.addEventListener('click',()=>{const open=sidebar.classList.toggle('open');menuToggle.setAttribute('aria-expanded',String(open));});
+menuToggle.addEventListener('click',()=>{
+  const open=!sidebar.classList.contains('open');
+  if(open)sidebar.style.setProperty('--sidebar-top',`${window.scrollY}px`);
+  sidebar.classList.toggle('open',open);
+  menuToggle.setAttribute('aria-expanded',String(open));
+});
+function closeSidebar(){sidebar.classList.remove('open');menuToggle.setAttribute('aria-expanded','false');}
+function updateViewportInset(){
+  const viewport=window.visualViewport;
+  const viewportHeight=viewport?.height||window.innerHeight;
+  const bottomInset=viewport?Math.max(0,window.innerHeight-viewport.height-viewport.offsetTop):0;
+  document.documentElement.style.setProperty('--browser-chrome-bottom',`${bottomInset}px`);
+  document.documentElement.style.setProperty('--visible-viewport-height',`${viewportHeight}px`);
+}
+updateViewportInset();
+window.visualViewport?.addEventListener('resize',updateViewportInset);
+window.visualViewport?.addEventListener('scroll',updateViewportInset);
+window.addEventListener('resize',updateViewportInset);
+window.addEventListener('scroll',()=>{
+  if(window.matchMedia('(max-width: 700px)').matches)closeSidebar();
+},{passive:true});
 document.addEventListener('click',event=>{
-  if(window.matchMedia('(max-width: 700px)').matches&&sidebar.classList.contains('open')&&!sidebar.contains(event.target)&&!menuToggle.contains(event.target)){sidebar.classList.remove('open');menuToggle.setAttribute('aria-expanded','false');}
+  if(window.matchMedia('(max-width: 700px)').matches&&sidebar.classList.contains('open')&&!sidebar.contains(event.target)&&!menuToggle.contains(event.target))closeSidebar();
 });
 $('#item-picker').addEventListener('change',event=>{const item=catalog.find(entry=>String(entry.id)===event.target.value);if(item){const existing=cart.find(entry=>entry.id===item.id);if(existing)existing.quantity++;else cart.push({...item,quantity:1});renderCart();event.target.value=''}});
 $('#cart').addEventListener('input',event=>{if(event.target.dataset.quantity){const item=cart.find(entry=>entry.id===Number(event.target.dataset.quantity)),quantity=Math.floor(Number(event.target.value));if(item&&quantity>0){item.quantity=quantity;event.target.closest('.cart-row').querySelector('strong').textContent=money(item.price*quantity);updateCartTotal()}}});
