@@ -78,6 +78,12 @@ test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',asy
   assert.equal((await employee.request(`/api/sales/${ownSale.data.id}`,{method:'PATCH',businessId:business.id,body:{payment_method:'cash',discount:1000,notes:'Corrección de cobro',items:[{id:catalogId,quantity:2}]}})).status,200);
   const ownDetail=await employee.request(`/api/sales/${ownSale.data.id}`,{businessId:business.id});
   assert.equal(ownDetail.data.payment_method,'cash'); assert.equal(ownDetail.data.discount,1000);
+  const employeeDashboard=await employee.request('/api/dashboard',{businessId:business.id});
+  assert.equal(employeeDashboard.data.scope,'personal');
+  assert.equal(Number(employeeDashboard.data.summary.tickets),1,'el empleado solo ve sus atenciones en el resumen');
+  assert.equal(Number(employeeDashboard.data.summary.revenue),23000,'el resumen personal conserva el descuento de su venta');
+  assert.equal(employeeDashboard.data.employees.length,0,'el empleado no recibe métricas del resto del equipo');
+  assert.equal(employeeDashboard.data.recent.length,1,'el empleado solo recibe su actividad reciente');
 
   const audit=await admin.request('/api/audit',{businessId:business.id});
   assert.equal(audit.status,200); assert.ok(audit.data.some(entry=>entry.entity_type==='sale'&&entry.entity_id===ownSale.data.id&&entry.action==='updated'));

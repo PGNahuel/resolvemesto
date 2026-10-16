@@ -219,13 +219,14 @@ export class Service {
   }
 
   dashboard(context,startParam,endParam) {
-    const today=new Date(Date.now()-3*60*60*1000).toISOString().slice(0,10),first=this.repository.firstSaleDate(context.business.id)||today;
+    const isAdmin=context.business.role==='admin',employeeId=isAdmin?null:context.business.employee_id;
+    const today=new Date(Date.now()-3*60*60*1000).toISOString().slice(0,10),first=this.repository.firstSaleDate(context.business.id,employeeId)||today;
     let start=isDate(startParam)?startParam:today,end=isDate(endParam)?endParam:today;
     if(start<first)start=first; if(end>today)end=today;
     if(start>end)throw badRequest('La fecha de inicio debe ser anterior o igual a la fecha final.');
     const span=Math.round((Date.parse(`${end}T00:00:00Z`)-Date.parse(`${start}T00:00:00Z`))/86400000)+1;
-    const summary=this.repository.dashboardSummary(context.business.id,start,end),previous=this.repository.dashboardPrevious(context.business.id,start,span),employees=this.repository.dashboardEmployees(context.business.id,start,end),featured=this.repository.dashboardFeatured(context.business.id,start,end),recent=this.repository.dashboardRecent(context.business.id,start,end);
-    return {summary,previous,dateRange:{min:first,max:today,start,end},employees,featured:{services:featured.filter(item=>item.type==='service').slice(0,3),products:featured.filter(item=>item.type==='product').slice(0,3)},recent};
+    const summary=this.repository.dashboardSummary(context.business.id,start,end,employeeId),previous=this.repository.dashboardPrevious(context.business.id,start,span,employeeId),employees=isAdmin?this.repository.dashboardEmployees(context.business.id,start,end):[],featured=this.repository.dashboardFeatured(context.business.id,start,end,employeeId),recent=this.repository.dashboardRecent(context.business.id,start,end,employeeId);
+    return {scope:isAdmin?'business':'personal',summary,previous,dateRange:{min:first,max:today,start,end},employees,featured:{services:featured.filter(item=>item.type==='service').slice(0,3),products:featured.filter(item=>item.type==='product').slice(0,3)},recent};
   }
 
   #customerInput(input) {

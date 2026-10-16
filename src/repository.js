@@ -112,21 +112,21 @@ export class Repository {
       FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id WHERE a.business_id=? ORDER BY a.id DESC LIMIT 100`).all(businessId);
   }
 
-  firstSaleDate(businessId) { return this.db.prepare("SELECT MIN(date(created_at,'-3 hours')) date FROM sales WHERE business_id=? AND status='completed'").get(businessId).date||null; }
-  dashboardSummary(businessId,start,end) {
+  firstSaleDate(businessId,employeeId=null) { return this.db.prepare("SELECT MIN(date(created_at,'-3 hours')) date FROM sales WHERE business_id=? AND status='completed' AND (? IS NULL OR employee_id=?)").get(businessId,employeeId,employeeId).date||null; }
+  dashboardSummary(businessId,start,end,employeeId=null) {
     return this.db.prepare(`WITH ticket_totals AS (
       SELECT s.id,MAX(0,SUM(si.quantity*si.unit_price)-s.discount) total,
       SUM(CASE WHEN si.item_type='service' THEN si.quantity ELSE 0 END) services,
       SUM(CASE WHEN si.item_type='product' THEN si.quantity ELSE 0 END) products
       FROM sales s JOIN sale_items si ON si.sale_id=s.id
-      WHERE s.business_id=? AND s.status='completed' AND date(s.created_at,'-3 hours') BETWEEN ? AND ? GROUP BY s.id)
-      SELECT COALESCE(SUM(total),0) revenue,COALESCE(SUM(services),0) services,COALESCE(SUM(products),0) products,COUNT(*) tickets FROM ticket_totals`).get(businessId,start,end);
+      WHERE s.business_id=? AND s.status='completed' AND (? IS NULL OR s.employee_id=?) AND date(s.created_at,'-3 hours') BETWEEN ? AND ? GROUP BY s.id)
+      SELECT COALESCE(SUM(total),0) revenue,COALESCE(SUM(services),0) services,COALESCE(SUM(products),0) products,COUNT(*) tickets FROM ticket_totals`).get(businessId,employeeId,employeeId,start,end);
   }
-  dashboardPrevious(businessId,start,span) {
+  dashboardPrevious(businessId,start,span,employeeId=null) {
     return this.db.prepare(`WITH ticket_totals AS (
       SELECT s.id,MAX(0,SUM(si.quantity*si.unit_price)-s.discount) total FROM sales s JOIN sale_items si ON si.sale_id=s.id
-      WHERE s.business_id=? AND s.status='completed' AND date(s.created_at,'-3 hours')>=date(?,'-' || ? || ' days') AND date(s.created_at,'-3 hours')<? GROUP BY s.id)
-      SELECT COALESCE(SUM(total),0) revenue,COUNT(*) tickets FROM ticket_totals`).get(businessId,start,span,start);
+      WHERE s.business_id=? AND s.status='completed' AND (? IS NULL OR s.employee_id=?) AND date(s.created_at,'-3 hours')>=date(?,'-' || ? || ' days') AND date(s.created_at,'-3 hours')<? GROUP BY s.id)
+      SELECT COALESCE(SUM(total),0) revenue,COUNT(*) tickets FROM ticket_totals`).get(businessId,employeeId,employeeId,start,span,start);
   }
   dashboardEmployees(businessId,start,end) {
     return this.db.prepare(`SELECT u.name,u.profile_photo,COUNT(DISTINCT s.id) tickets,
@@ -139,17 +139,17 @@ export class Repository {
       LEFT JOIN sales s ON s.employee_id=e.id AND s.status='completed' AND date(s.created_at,'-3 hours') BETWEEN ? AND ?
       LEFT JOIN sale_items si ON si.sale_id=s.id WHERE e.business_id=? GROUP BY e.id ORDER BY revenue DESC`).all(start,end,start,end,businessId);
   }
-  dashboardFeatured(businessId,start,end) {
+  dashboardFeatured(businessId,start,end,employeeId=null) {
     return this.db.prepare(`SELECT si.item_name name,si.item_type type,SUM(si.quantity) quantity,SUM(si.quantity*si.unit_price) revenue
       FROM sales s JOIN sale_items si ON si.sale_id=s.id WHERE s.business_id=? AND s.status='completed'
-      AND date(s.created_at,'-3 hours') BETWEEN ? AND ? GROUP BY si.catalog_id ORDER BY revenue DESC`).all(businessId,start,end);
+      AND (? IS NULL OR s.employee_id=?) AND date(s.created_at,'-3 hours') BETWEEN ? AND ? GROUP BY si.catalog_id ORDER BY revenue DESC`).all(businessId,employeeId,employeeId,start,end);
   }
-  dashboardRecent(businessId,start,end) {
+  dashboardRecent(businessId,start,end,employeeId=null) {
     return this.db.prepare(`SELECT s.id,COALESCE(c.full_name,s.customer) customer,s.created_at,u.name employee,u.profile_photo,
       MAX(0,COALESCE(SUM(si.quantity*si.unit_price),0)-s.discount) total,GROUP_CONCAT(si.item_name||' ×'||si.quantity,', ') items
       FROM sales s JOIN employees e ON e.id=s.employee_id JOIN users u ON u.id=e.user_id
       LEFT JOIN customers c ON c.id=s.customer_id JOIN sale_items si ON si.sale_id=s.id
-      WHERE s.business_id=? AND s.status='completed' AND date(s.created_at,'-3 hours') BETWEEN ? AND ?
-      GROUP BY s.id ORDER BY s.created_at DESC LIMIT 5`).all(businessId,start,end);
+      WHERE s.business_id=? AND s.status='completed' AND (? IS NULL OR s.employee_id=?) AND date(s.created_at,'-3 hours') BETWEEN ? AND ?
+      GROUP BY s.id ORDER BY s.created_at DESC LIMIT 5`).all(businessId,employeeId,employeeId,start,end);
   }
 }
