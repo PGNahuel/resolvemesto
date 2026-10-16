@@ -42,6 +42,12 @@ async function registerAdmin(api,{name,email,password,business}) {
 test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',async t=>{
   const server=await startServer();
   t.after(async()=>{ server.child.kill('SIGTERM'); await new Promise(resolve=>server.child.once('exit',resolve)); await rm(server.directory,{recursive:true,force:true}); });
+  const manifestResponse=await fetch(`${server.url}/manifest.webmanifest?page=customers`);
+  const manifest=await manifestResponse.json();
+  assert.equal(manifestResponse.headers.get('content-type'),'application/manifest+json; charset=utf-8');
+  assert.equal(manifest.start_url,'/#/customers');
+  assert.equal(manifest.id,'/ritual-customers');
+  assert.deepEqual(manifest.icons.map(icon=>icon.sizes),['192x192','512x512']);
   const admin=client(server.url),employee=client(server.url),otherAdmin=client(server.url);
   const adminPassword='AdminSeguro!2026',employeePassword='Empleado!2026';
   const business=await registerAdmin(admin,{name:'Ana Admin',email:' Admin@Example.com ',password:adminPassword,business:'Barbería Uno'});

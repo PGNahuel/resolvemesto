@@ -18,7 +18,7 @@ async function api(path, options={}) {
 }
 function setLoading(active) { document.body.toggleAttribute('aria-busy',active); $('#loading').classList.toggle('show',active); $$('button[type="submit"]').forEach(button=>button.disabled=active); }
 function toast(message,kind='info') { const el=$('#toast'); el.textContent=message; el.dataset.kind=kind; el.setAttribute('role',kind==='error'?'alert':'status'); el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),4500); }
-function show(id) { ['auth','waiting','app'].forEach(name=>$('#'+name).classList.toggle('hidden',name!==id)); }
+function show(id) { ['auth','waiting','app'].forEach(name=>$('#'+name).classList.toggle('hidden',name!==id)); if(id!=='app')document.title='Ritual · Gestión simple'; }
 function initials(name) { return String(name||'').trim().slice(0,1).toUpperCase()||'·'; }
 function setPhoto(element, photo, fallback='+') { element.replaceChildren(); if(photo) { const image=document.createElement('img'); image.src=photo; image.alt='Foto de perfil'; element.append(image); } else element.textContent=fallback; }
 function setAuthMode(mode) {
@@ -38,7 +38,7 @@ async function start() {
     show('app'); await startApp();
   } catch(error) { if(error.status===401)show('auth'); else { toast(error.message,'error'); if(me)show('app'); } }
 }
-async function startApp() { await Promise.all([loadDashboard(),loadCatalog(),loadCustomers(),loadEmployees(),loadSales()]); updateBrand(); }
+async function startApp() { await Promise.all([loadDashboard(),loadCatalog(),loadCustomers(),loadEmployees(),loadSales()]); updateBrand(); navigate(pageFromHash(),false); }
 function updateBrand() {
   const logo=business?.logo;
   $('#logo-preview').innerHTML=logo?`<img alt="Logo" src="${logo}">`:'✦';
@@ -122,11 +122,60 @@ $('#waiting-logout').addEventListener('click',async()=>{await api('/api/logout',
 $$('.nav-link[data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
 $$('.mobile-dock [data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
 const themeToggle=$('.theme-toggle');
-function setTheme(theme){document.documentElement.dataset.theme=theme;localStorage.setItem('ritual-theme',theme);const dark=theme==='dark';themeToggle.setAttribute('aria-label',dark?'Activar modo claro':'Activar modo oscuro');themeToggle.innerHTML=`${dark?'☀':'☾'} <span class="theme-label">Modo ${dark?'claro':'oscuro'}</span>`;}
+function setTheme(theme){document.documentElement.dataset.theme=theme;localStorage.setItem('ritual-theme',theme);const dark=theme==='dark';themeToggle.setAttribute('aria-label',dark?'Activar modo claro':'Activar modo oscuro');themeToggle.innerHTML=`<span class="action-icon">${dark?'☀':'☾'}</span><span class="theme-label action-label">${dark?'Claro':'Oscuro'}</span>`;}
 setTheme(localStorage.getItem('ritual-theme')||'light');
 themeToggle.addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
 $$('[data-go]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.go)));
-function navigate(page) { if(['business','audit'].includes(page)&&business.role!=='admin') return; $$('.nav-link[data-page],.mobile-dock [data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page)); $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page)); $('#page-title').textContent=({'home':'Resumen','new-sale':'Nueva venta','sales':'Ventas realizadas','customers':'Clientes','catalog':'Servicios y productos','business':'Mi negocio','team':'Equipo','audit':'Auditoría'})[page]||'Resumen'; $('.sidebar').classList.remove('open'); menuToggle.setAttribute('aria-expanded','false'); if(page==='new-sale') $('#sale-customer').focus(); if(page==='sales') loadSales().catch(error=>toast(error.message,'error')); if(page==='audit')loadAudit().catch(error=>toast(error.message,'error')); }
+const pageTitles={home:'Resumen','new-sale':'Nueva venta',sales:'Ventas realizadas',customers:'Clientes',catalog:'Servicios y productos',business:'Mi negocio',team:'Equipo',audit:'Auditoría'};
+let currentPage='home';
+function pageFromHash() { const page=location.hash.slice(2); return location.hash.startsWith('#/')&&Object.hasOwn(pageTitles,page)?page:'home'; }
+const isAndroid=/Android/.test(navigator.userAgent);
+const isMobileDevice=!!navigator.userAgentData?.mobile||/Android|iPhone|iPad|iPod/.test(navigator.userAgent)||navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
+$('.sidebar-actions').classList.toggle('mobile-shortcut',isMobileDevice);
+$('.shortcut-trigger').classList.toggle('hidden',!isMobileDevice);
+let installPrompt=null,installPromptPage=null,manifestPage=pageFromHash();
+window.addEventListener('beforeinstallprompt',event=>{if(!isAndroid)return;event.preventDefault();installPrompt=event;installPromptPage=manifestPage;});
+window.addEventListener('appinstalled',()=>{installPrompt=null;installPromptPage=null;});
+let manifestLink=null;
+if(window.isSecureContext) { manifestLink=document.createElement('link'); manifestLink.rel='manifest'; manifestLink.href=`/manifest.webmanifest?page=${manifestPage}`; document.head.append(manifestLink); }
+function setManifestPage(page) { if(page===manifestPage)return; manifestPage=page; installPrompt=null; installPromptPage=null; if(manifestLink)manifestLink.href=`/manifest.webmanifest?page=${page}`; }
+function navigate(page,updateUrl=true) {
+  if(!Object.hasOwn(pageTitles,page)||(['business','audit'].includes(page)&&business?.role!=='admin'))page='home';
+  currentPage=page;
+  setManifestPage(page);
+  if(updateUrl&&location.hash!==`#/${page}`)location.hash=`/${page}`;
+  else if(!updateUrl&&location.hash&&location.hash!==`#/${page}`)history.replaceState(null,'',`${location.pathname}${location.search}#/${page}`);
+  $$('.nav-link[data-page],.mobile-dock [data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page));
+  $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page));
+  $('#page-title').textContent=pageTitles[page];
+  document.title=page==='home'?'Ritual · Gestión simple':`${pageTitles[page]} · Ritual`;
+  $('.sidebar').classList.remove('open'); menuToggle.setAttribute('aria-expanded','false');
+  if(page==='new-sale')$('#sale-customer').focus();
+  if(page==='sales')loadSales().catch(error=>toast(error.message,'error'));
+  if(page==='audit')loadAudit().catch(error=>toast(error.message,'error'));
+}
+window.addEventListener('hashchange',()=>{if(business&&(pageFromHash()!==currentPage||location.hash&&location.hash!==`#/${currentPage}`))navigate(pageFromHash(),false);});
+function closeShortcutModal() { $('#shortcut-modal').classList.add('hidden'); }
+$('.shortcut-trigger').addEventListener('click',async()=>{
+  if(isAndroid&&installPrompt&&installPromptPage===currentPage) {
+    const prompt=installPrompt; installPrompt=null; installPromptPage=null;
+    try { const choice=await prompt.prompt(); if(choice.outcome==='accepted')toast('Buscá el nuevo ícono en la pantalla de inicio.'); }
+    catch { toast('No se pudo abrir esa opción. Tocá el menú (⋮) y elegí “Instalar y crear acceso directo”.','error'); }
+    return;
+  }
+  $('#shortcut-page').textContent=`Esta pantalla: ${pageTitles[currentPage]}`;
+  const ios=/iPad|iPhone|iPod/.test(navigator.userAgent)||navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1,safari=/Safari/.test(navigator.userAgent)&&!/CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent);
+  $('#shortcut-title').textContent='Agregar al inicio';
+  $('#shortcut-instructions').textContent=ios
+    ? safari?'Tocá Compartir (el cuadrado con una flecha), elegí “Agregar a inicio” y confirmá.':'Tocá “Copiar enlace”, abrilo en Safari y allí elegí Compartir → Agregar a inicio.'
+    : isAndroid?'Tocá el menú (⋮), elegí “Instalar y crear acceso directo” y después “Crear acceso directo”. Confirmá para verlo en el inicio de tu celular.'
+      :'Abrí el menú de tu navegador y elegí “Instalar y crear acceso directo”.';
+  $('#shortcut-copy').classList.toggle('hidden',!ios||safari);
+  $('#shortcut-modal').classList.remove('hidden'); $('.close-shortcut-modal').focus();
+});
+$('.close-shortcut-modal').addEventListener('click',closeShortcutModal);
+$('#shortcut-modal').addEventListener('click',event=>{if(event.target===event.currentTarget)closeShortcutModal();});
+$('#shortcut-copy').addEventListener('click',async()=>{try { await navigator.clipboard.writeText(location.href); toast('Enlace copiado.'); } catch { toast('No se pudo copiar. Mantené presionada la dirección de arriba y elegí “Copiar”.','error'); }});
 ['#date-start','#date-end'].forEach(selector=>$(selector).addEventListener('change',()=>loadDashboard().catch(error=>toast(error.message))));
 const sidebar=$('.sidebar'), menuToggle=$('#menu-toggle');
 menuToggle.addEventListener('click',()=>{
@@ -194,7 +243,7 @@ $('#edit-profile').addEventListener('click',openProfileModal);
 $('.close-profile-modal').addEventListener('click',closeProfileModal);
 $('#profile-modal').addEventListener('click',event=>{if(event.target===event.currentTarget)closeProfileModal()});
 $('#profile-form').addEventListener('submit',async event=>{event.preventDefault();try { const form=event.currentTarget,profile_photo=form.elements.profile_photo.value,password=form.elements.password.value,currentPassword=form.elements.current_password.value; await api('/api/profile',{method:'PATCH',body:JSON.stringify({profile_photo})}); me.profile_photo=profile_photo||null; setPhoto($('#avatar'),me.profile_photo,initials(me.name)); if(password||currentPassword) { await api('/api/password',{method:'PATCH',body:JSON.stringify({current_password:currentPassword,password})}); form.reset(); closeProfileModal(); localStorage.removeItem('ritual-business'); me=null;business=null;show('auth');toast('Contraseña actualizada. Volvé a ingresar.'); return; } closeProfileModal();toast('Perfil actualizado.'); } catch(error) { toast(error.message,'error'); }});
-document.addEventListener('keydown',event=>{if(event.key!=='Escape')return; closeCustomerModal();closeProfileModal();closeSaleModal();closeCatalogModal();sidebar.classList.remove('open');menuToggle.setAttribute('aria-expanded','false');});
+document.addEventListener('keydown',event=>{if(event.key!=='Escape')return; closeCustomerModal();closeProfileModal();closeSaleModal();closeCatalogModal();closeShortcutModal();sidebar.classList.remove('open');menuToggle.setAttribute('aria-expanded','false');});
 if(adminRegistration) {
   $$('.auth-tabs').forEach(el=>el.classList.add('hidden')); $('#auth-eyebrow').textContent='ALTA ADMINISTRATIVA'; $('#auth-title').innerHTML='Creá tu negocio,<br>en orden.'; $('#auth-copy').textContent='Esta es la única vía para crear un negocio y su cuenta administradora.'; setAuthMode('admin-register');
 } else setAuthMode('login');

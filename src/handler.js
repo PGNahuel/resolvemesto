@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { notFound, unauthorized } from './errors.js';
 
-const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};
+const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.png':'image/png'};
+const installPages={home:'Resumen','new-sale':'Nueva venta',sales:'Ventas',customers:'Clientes',catalog:'Catálogo',business:'Mi negocio',team:'Equipo',audit:'Auditoría'};
 
 export function sendJson(res,status,payload) {
   res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
@@ -14,6 +15,11 @@ export class Handler {
 
   async handle(req,res) {
     const url=new URL(req.url,'http://localhost'),path=url.pathname,method=req.method;
+    if(method==='GET'&&path==='/manifest.webmanifest') {
+      const page=Object.hasOwn(installPages,url.searchParams.get('page'))?url.searchParams.get('page'):'home';
+      const manifest={id:`/ritual-${page}`,name:`Ritual · ${installPages[page]}`,short_name:`Ritual ${installPages[page]}`,start_url:`/#/${page}`,scope:'/',display:'standalone',background_color:'#f6f5f2',theme_color:'#31493d',icons:[{src:'/icon-192.png',sizes:'192x192',type:'image/png'},{src:'/icon-512.png',sizes:'512x512',type:'image/png'}]};
+      res.writeHead(200,{'content-type':'application/manifest+json; charset=utf-8','cache-control':'no-store'}); res.end(JSON.stringify(manifest)); return;
+    }
     if(method==='GET'&&!path.startsWith('/api/'))return this.#static(path,res);
 
     if(method==='POST'&&path==='/api/register')return sendJson(res,201,await this.service.registerUser(await readJsonBody(req)));
@@ -79,7 +85,7 @@ export class Handler {
   async #static(path,res) {
     const file=path==='/'||path==='/new/admin'?'index.html':path.slice(1);
     if(file.includes('..'))throw notFound('No encontrado.');
-    try { const data=await readFile(join(this.publicDirectory,file)); res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream'}); res.end(data); }
+    try { const data=await readFile(join(this.publicDirectory,file)); res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream','cache-control':'no-store'}); res.end(data); }
     catch(error) { if(error.code==='ENOENT')throw notFound('No encontrado.'); throw error; }
   }
 }
