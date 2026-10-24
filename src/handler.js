@@ -17,7 +17,7 @@ export class Handler {
     const url=new URL(req.url,'http://localhost'),path=url.pathname,method=req.method;
     if(method==='GET'&&path==='/manifest.webmanifest') {
       const page=Object.hasOwn(installPages,url.searchParams.get('page'))?url.searchParams.get('page'):'home';
-      const manifest={id:`/ritual-${page}`,name:`Ritual · ${installPages[page]}`,short_name:`Ritual ${installPages[page]}`,start_url:`/#/${page}`,scope:'/',display:'standalone',background_color:'#f6f5f2',theme_color:'#31493d',icons:[{src:'/icon-192.png',sizes:'192x192',type:'image/png'},{src:'/icon-512.png',sizes:'512x512',type:'image/png'}]};
+      const manifest={id:`/resolvemesto-${page}`,name:`Resolvemesto · ${installPages[page]}`,short_name:`Resolvemesto ${installPages[page]}`,start_url:`/#/${page}`,scope:'/',display:'standalone',background_color:'#f6f5f2',theme_color:'#31493d',icons:[{src:'/icon-192.png',sizes:'192x192',type:'image/png'},{src:'/icon-512.png',sizes:'512x512',type:'image/png'}]};
       res.writeHead(200,{'content-type':'application/manifest+json; charset=utf-8','cache-control':'no-store'}); res.end(JSON.stringify(manifest)); return;
     }
     if(method==='GET'&&!path.startsWith('/api/'))return this.#static(path,res);

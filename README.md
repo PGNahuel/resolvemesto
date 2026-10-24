@@ -1,4 +1,4 @@
-# Ritual · gestión para barberías y salones
+# Resolvemesto · gestión para barberías y salones
 
 MVP web para registrar servicios y productos, organizar el equipo y consultar la actividad del negocio. La interfaz está en español, muestra precios en pesos argentinos y se adapta a celulares.
 
@@ -12,7 +12,7 @@ MVP web para registrar servicios y productos, organizar el equipo y consultar la
 
 El servidor escribe logs JSON en la terminal. Cada solicitud API incluye un `request_id`, método, ruta, estado y duración; ante errores internos también registra el código y mensaje técnico. No registra contraseñas ni emails.
 
-La base `barberia.sqlite` se crea automáticamente en el directorio del proyecto. Conservá ese archivo para guardar los datos y respaldalo periódicamente. En un despliegue, montá almacenamiento persistente para la base y mantené el proceso en una sola instancia.
+La base `resolvemesto.sqlite` se crea automáticamente en el directorio del proyecto. Si ya existe una base `barberia.sqlite`, la aplicación sigue usándola para conservar los datos. También podés indicar la ubicación con `DB_PATH`. Conservá ese archivo para guardar los datos y respaldalo periódicamente. En un despliegue, montá almacenamiento persistente para la base y mantené el proceso en una sola instancia.
 
 ## Primer uso
 

@@ -1,9 +1,12 @@
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 const root=new URL('..',import.meta.url).pathname;
+const currentDatabase=join(root,'resolvemesto.sqlite');
+const previousDatabase=join(root,'barberia.sqlite');
 
-export function createDatabase(path=process.env.DB_PATH||join(root,'barberia.sqlite')) {
+export function createDatabase(path=process.env.DB_PATH||(existsSync(currentDatabase)||!existsSync(previousDatabase)?currentDatabase:previousDatabase)) {
   const db=new DatabaseSync(path);
   db.exec(`PRAGMA foreign_keys=ON;
 PRAGMA journal_mode=WAL;

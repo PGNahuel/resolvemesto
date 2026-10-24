@@ -75,7 +75,7 @@ export class Service {
 
   authorizeBusiness(user,businessId) {
     const business=Number.isInteger(businessId)&&businessId>0?this.repository.findBusinessMembership(businessId,user.id):null;
-    if(!business)throw forbidden('No tenés acceso a esta barbería.');
+    if(!business)throw forbidden('No tenés acceso a este negocio.');
     return business;
   }
 
@@ -90,11 +90,11 @@ export class Service {
   }
 
   listCustomers(context) {
-    return this.repository.listCustomers(context.business.id).map(customer=>({...customer,email:customer.email.endsWith('@ritual.internal')?'':customer.email,code:String(customer.id).padStart(5,'0')}));
+    return this.repository.listCustomers(context.business.id).map(customer=>({...customer,email:/@(ritual|resolvemesto)\.internal$/.test(customer.email)?'':customer.email,code:String(customer.id).padStart(5,'0')}));
   }
 
   createCustomer(context,input) {
-    const customer=this.#customerInput(input),storedEmail=customer.email||`${randomUUID()}@ritual.internal`;
+    const customer=this.#customerInput(input),storedEmail=customer.email||`${randomUUID()}@resolvemesto.internal`;
     try {
       return this.repository.transaction(()=>{
         const id=this.repository.createCustomer(context.business.id,{...customer,email:storedEmail});
@@ -110,7 +110,7 @@ export class Service {
     if(!Number.isInteger(customerId)||customerId<1)throw badRequest('Completá nombre y teléfono; si ingresás un email, debe ser válido.');
     const customer=this.#customerInput(input),before=this.repository.getCustomer(customerId,context.business.id);
     if(!before)throw notFound('Cliente no encontrado.');
-    const storedEmail=customer.email||`${randomUUID()}@ritual.internal`,after={full_name:customer.fullName,phone:customer.phone,email:storedEmail,profile_photo:customer.profilePhoto};
+    const storedEmail=customer.email||`${randomUUID()}@resolvemesto.internal`,after={full_name:customer.fullName,phone:customer.phone,email:storedEmail,profile_photo:customer.profilePhoto};
     try { this.repository.transaction(()=>{ this.repository.updateCustomer(customerId,context.business.id,{...customer,email:storedEmail}); this.#audit(context,'updated','customer',customerId,before,after); }); return {ok:true}; }
     catch(error) { if(isUnique(error,'customers.business_id, customers.email'))throw conflict('Ya existe un cliente con ese email.'); throw error; }
   }

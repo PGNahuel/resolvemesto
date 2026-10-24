@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 const projectRoot=resolve(import.meta.dirname,'..');
 
 async function startServer() {
-  const directory=await mkdtemp(join(tmpdir(),'ritual-e2e-'));
+  const directory=await mkdtemp(join(tmpdir(),'resolvemesto-e2e-'));
   const child=spawn(process.execPath,['server.js'],{cwd:projectRoot,env:{...process.env,PORT:'0',DB_PATH:join(directory,'test.sqlite')},stdio:['ignore','pipe','pipe']});
   const url=await new Promise((resolveUrl,reject)=>{
     let output='';
@@ -46,7 +46,8 @@ test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',asy
   const manifest=await manifestResponse.json();
   assert.equal(manifestResponse.headers.get('content-type'),'application/manifest+json; charset=utf-8');
   assert.equal(manifest.start_url,'/#/customers');
-  assert.equal(manifest.id,'/ritual-customers');
+  assert.equal(manifest.id,'/resolvemesto-customers');
+  assert.equal(manifest.name,'Resolvemesto · Clientes');
   assert.deepEqual(manifest.icons.map(icon=>icon.sizes),['192x192','512x512']);
   const admin=client(server.url),employee=client(server.url),otherAdmin=client(server.url);
   const adminPassword='AdminSeguro!2026',employeePassword='Empleado!2026';
@@ -119,7 +120,7 @@ test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',asy
 test('rutas CRUD conservan sus contratos después de separar las capas',async t=>{
   const server=await startServer();
   t.after(async()=>{ server.child.kill('SIGTERM'); await new Promise(resolve=>server.child.once('exit',resolve)); await rm(server.directory,{recursive:true,force:true}); });
-  const page=await fetch(server.url+'/'); assert.equal(page.status,200); assert.match(await page.text(),/<title>Ritual/);
+  const page=await fetch(server.url+'/'); assert.equal(page.status,200); assert.match(await page.text(),/<title>Resolvemesto/);
   const admin=client(server.url),business=await registerAdmin(admin,{name:'Admin CRUD',email:'crud@example.com',password:'CrudSeguro!2026',business:'Nombre inicial'});
 
   assert.equal((await admin.request('/api/business',{method:'PATCH',businessId:business.id,body:{name:'Nombre actualizado',logo:''}})).status,200);

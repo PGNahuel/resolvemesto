@@ -3,5 +3,8 @@ node_modules/
 barberia.sqlite
 barberia.sqlite-shm
 barberia.sqlite-wal
+resolvemesto.sqlite
+resolvemesto.sqlite-shm
+resolvemesto.sqlite-wal
 .aws
 docs/despliegue-hostinger-vps.md

@@ -18,7 +18,7 @@ async function api(path, options={}) {
 }
 function setLoading(active) { document.body.toggleAttribute('aria-busy',active); $('#loading').classList.toggle('show',active); $$('button[type="submit"]').forEach(button=>button.disabled=active); }
 function toast(message,kind='info') { const el=$('#toast'); el.textContent=message; el.dataset.kind=kind; el.setAttribute('role',kind==='error'?'alert':'status'); el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),4500); }
-function show(id) { ['auth','waiting','app'].forEach(name=>$('#'+name).classList.toggle('hidden',name!==id)); if(id!=='app')document.title='Ritual · Gestión simple'; }
+function show(id) { ['auth','waiting','app'].forEach(name=>$('#'+name).classList.toggle('hidden',name!==id)); if(id!=='app')document.title='Resolvemesto · Gestión simple'; }
 function initials(name) { return String(name||'').trim().slice(0,1).toUpperCase()||'·'; }
 function setPhoto(element, photo, fallback='+') { element.replaceChildren(); if(photo) { const image=document.createElement('img'); image.src=photo; image.alt='Foto de perfil'; element.append(image); } else element.textContent=fallback; }
 function setAuthMode(mode) {
@@ -28,12 +28,12 @@ function setAuthMode(mode) {
   const password=$('#auth-form').elements.password; password.minLength=registering?10:1; password.placeholder=registering?'Mínimo 10 caracteres':'Tu contraseña'; password.autocomplete=registering?'new-password':'current-password';
   $('#auth-submit').textContent=registering?(mode==='admin-register'?'Crear negocio y cuenta':'Crear usuario'):'Ingresar';
 }
-function selectBusiness(next) { business=next; localStorage.setItem('ritual-business',String(next.id)); $('#top-name').textContent=next.name; $('#top-role').textContent=next.role==='admin'?'Administración':'Equipo'; $('#brand-name').value=next.name; }
+function selectBusiness(next) { business=next; localStorage.setItem('resolvemesto-business',String(next.id)); $('#top-name').textContent=next.name; $('#top-role').textContent=next.role==='admin'?'Administración':'Equipo'; $('#brand-name').value=next.name; }
 async function start() {
   try { const data=await api('/api/me'); me=data.user; $('#profile-name').textContent=me.name; $('#profile-email').textContent=me.email; setPhoto($('#avatar'),me.profile_photo,initials(me.name));
     if(!data.businesses.length) { show('waiting'); return; }
     $('#business-picker').replaceChildren();
-    const saved=localStorage.getItem('ritual-business'); selectBusiness(data.businesses.find(x=>String(x.id)===saved)||data.businesses[0]);
+    const saved=localStorage.getItem('resolvemesto-business'); selectBusiness(data.businesses.find(x=>String(x.id)===saved)||data.businesses[0]);
     if(data.businesses.length>1) { const pick=document.createElement('select'); pick.className='business-select'; pick.setAttribute('aria-label','Elegir espacio'); data.businesses.forEach(item=>{const option=document.createElement('option');option.value=item.id;option.textContent=item.name;option.selected=item.id===business.id;pick.append(option)}); pick.addEventListener('change',()=>{selectBusiness(data.businesses.find(x=>String(x.id)===pick.value));startApp()}); $('#business-picker').append(pick); }
     show('app'); await startApp();
   } catch(error) { if(error.status===401)show('auth'); else { toast(error.message,'error'); if(me)show('app'); } }
@@ -117,13 +117,13 @@ connectPhotoInputs({file:$('#customer-photo-file'),camera:$('#customer-photo-cam
 connectPhotoInputs({file:$('#profile-photo-file'),camera:$('#profile-photo-camera'),preview:$('#profile-photo-preview'),target:$('#profile-form').elements.profile_photo,fallback:initials('')});
 $$('.tab').forEach(tab=>tab.addEventListener('click',()=>setAuthMode(tab.dataset.auth)));
 $('#auth-form').addEventListener('submit',async event=>{event.preventDefault(); const formElement=event.currentTarget; const form=new FormData(formElement); const data=Object.fromEntries(form); try { if(authMode==='register') await api('/api/register',{method:'POST',body:JSON.stringify(data)}); if(authMode==='admin-register') await api('/api/admin/register',{method:'POST',body:JSON.stringify(data)}); await api('/api/login',{method:'POST',body:JSON.stringify({email:data.email,password:data.password})}); formElement.reset(); setPhoto($('#auth-photo-preview'),null); await start(); } catch(error) { toast(error.message); } });
-$('#logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});localStorage.removeItem('ritual-business');me=null;business=null;show('auth')});
+$('#logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});localStorage.removeItem('resolvemesto-business');me=null;business=null;show('auth')});
 $('#waiting-logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});me=null;business=null;show('auth')});
 $$('.nav-link[data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
 $$('.mobile-dock [data-page]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.page)));
 const themeToggle=$('.theme-toggle');
-function setTheme(theme){document.documentElement.dataset.theme=theme;localStorage.setItem('ritual-theme',theme);const dark=theme==='dark';themeToggle.setAttribute('aria-label',dark?'Activar modo claro':'Activar modo oscuro');themeToggle.innerHTML=`<span class="action-icon">${dark?'☀':'☾'}</span><span class="theme-label action-label">${dark?'Claro':'Oscuro'}</span>`;}
-setTheme(localStorage.getItem('ritual-theme')||'light');
+function setTheme(theme){document.documentElement.dataset.theme=theme;localStorage.setItem('resolvemesto-theme',theme);const dark=theme==='dark';themeToggle.setAttribute('aria-label',dark?'Activar modo claro':'Activar modo oscuro');themeToggle.innerHTML=`<span class="action-icon">${dark?'☀':'☾'}</span><span class="theme-label action-label">${dark?'Claro':'Oscuro'}</span>`;}
+setTheme(localStorage.getItem('resolvemesto-theme')||'light');
 themeToggle.addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
 $$('[data-go]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.go)));
 const pageTitles={home:'Resumen','new-sale':'Nueva venta',sales:'Ventas realizadas',customers:'Clientes',catalog:'Servicios y productos',business:'Mi negocio',team:'Equipo',audit:'Auditoría'};
@@ -148,7 +148,7 @@ function navigate(page,updateUrl=true) {
   $$('.nav-link[data-page],.mobile-dock [data-page]').forEach(button=>button.classList.toggle('active',button.dataset.page===page));
   $$('.page').forEach(section=>section.classList.toggle('hidden',section.id!=='page-'+page));
   $('#page-title').textContent=pageTitles[page];
-  document.title=page==='home'?'Ritual · Gestión simple':`${pageTitles[page]} · Ritual`;
+  document.title=page==='home'?'Resolvemesto · Gestión simple':`${pageTitles[page]} · Resolvemesto`;
   $('.sidebar').classList.remove('open'); menuToggle.setAttribute('aria-expanded','false');
   if(page==='new-sale')$('#sale-customer').focus();
   if(page==='sales')loadSales().catch(error=>toast(error.message,'error'));
@@ -242,9 +242,9 @@ function closeProfileModal() { $('#profile-modal').classList.add('hidden'); }
 $('#edit-profile').addEventListener('click',openProfileModal);
 $('.close-profile-modal').addEventListener('click',closeProfileModal);
 $('#profile-modal').addEventListener('click',event=>{if(event.target===event.currentTarget)closeProfileModal()});
-$('#profile-form').addEventListener('submit',async event=>{event.preventDefault();try { const form=event.currentTarget,profile_photo=form.elements.profile_photo.value,password=form.elements.password.value,currentPassword=form.elements.current_password.value; await api('/api/profile',{method:'PATCH',body:JSON.stringify({profile_photo})}); me.profile_photo=profile_photo||null; setPhoto($('#avatar'),me.profile_photo,initials(me.name)); if(password||currentPassword) { await api('/api/password',{method:'PATCH',body:JSON.stringify({current_password:currentPassword,password})}); form.reset(); closeProfileModal(); localStorage.removeItem('ritual-business'); me=null;business=null;show('auth');toast('Contraseña actualizada. Volvé a ingresar.'); return; } closeProfileModal();toast('Perfil actualizado.'); } catch(error) { toast(error.message,'error'); }});
+$('#profile-form').addEventListener('submit',async event=>{event.preventDefault();try { const form=event.currentTarget,profile_photo=form.elements.profile_photo.value,password=form.elements.password.value,currentPassword=form.elements.current_password.value; await api('/api/profile',{method:'PATCH',body:JSON.stringify({profile_photo})}); me.profile_photo=profile_photo||null; setPhoto($('#avatar'),me.profile_photo,initials(me.name)); if(password||currentPassword) { await api('/api/password',{method:'PATCH',body:JSON.stringify({current_password:currentPassword,password})}); form.reset(); closeProfileModal(); localStorage.removeItem('resolvemesto-business'); me=null;business=null;show('auth');toast('Contraseña actualizada. Volvé a ingresar.'); return; } closeProfileModal();toast('Perfil actualizado.'); } catch(error) { toast(error.message,'error'); }});
 document.addEventListener('keydown',event=>{if(event.key!=='Escape')return; closeCustomerModal();closeProfileModal();closeSaleModal();closeCatalogModal();closeShortcutModal();sidebar.classList.remove('open');menuToggle.setAttribute('aria-expanded','false');});
 if(adminRegistration) {
-  $$('.auth-tabs').forEach(el=>el.classList.add('hidden')); $('#auth-eyebrow').textContent='ALTA ADMINISTRATIVA'; $('#auth-title').innerHTML='Creá tu negocio,<br>en orden.'; $('#auth-copy').textContent='Esta es la única vía para crear un negocio y su cuenta administradora.'; setAuthMode('admin-register');
+  $$('.auth-tabs').forEach(el=>el.classList.add('hidden')); $('#auth-eyebrow').textContent='RESOLVEMESTO · ALTA ADMINISTRATIVA'; $('#auth-title').innerHTML='Creá tu negocio,<br>en orden.'; $('#auth-copy').textContent='Esta es la única vía para crear un negocio y su cuenta administradora.'; setAuthMode('admin-register');
 } else setAuthMode('login');
 start();
