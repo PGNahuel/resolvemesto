@@ -7,7 +7,9 @@ import { Service } from './src/service.js';
 import { Handler, sendJson } from './src/handler.js';
 
 const root=new URL('.',import.meta.url).pathname;
-const repository=new Repository(createDatabase());
+const database=createDatabase();
+await database.initialize();
+const repository=new Repository(database);
 const service=new Service(repository);
 const handler=new Handler(service,join(root,'public'));
 
@@ -39,6 +41,6 @@ const server=createServer(async(req,res)=>{
 const port=process.env.PORT===undefined?8081:Number(process.env.PORT);
 server.listen(port,'0.0.0.0',()=>log('server_started',{url:`http://localhost:${server.address().port}`,node:process.version}));
 
-function shutdown() { server.close(()=>{ repository.close(); process.exit(0); }); }
+function shutdown() { server.close(async()=>{ await repository.close(); process.exit(0); }); }
 process.on('SIGTERM',shutdown);
 process.on('SIGINT',shutdown);

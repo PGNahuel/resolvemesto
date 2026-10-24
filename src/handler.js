@@ -30,55 +30,55 @@ export class Handler {
       return sendJson(res,200,result.user);
     }
     if(method==='POST'&&path==='/api/logout') {
-      this.service.logout(getCookie(req,'sid'));
+      await this.service.logout(getCookie(req,'sid'));
       res.setHeader('set-cookie',sessionCookie('',0));
       return sendJson(res,200,{ok:true});
     }
 
-    const user=this.service.getSessionUser(getCookie(req,'sid'));
+    const user=await this.service.getSessionUser(getCookie(req,'sid'));
     if(path==='/api/me'&&method==='GET') {
       if(!user)throw unauthorized('Iniciá sesión.');
-      return sendJson(res,200,this.service.me(user));
+      return sendJson(res,200,await this.service.me(user));
     }
     if(!user)throw unauthorized('Iniciá sesión.');
 
-    if(path==='/api/profile'&&method==='PATCH')return sendJson(res,200,this.service.updateProfile(user,await readJsonBody(req)));
+    if(path==='/api/profile'&&method==='PATCH')return sendJson(res,200,await this.service.updateProfile(user,await readJsonBody(req)));
     if(path==='/api/password'&&method==='PATCH') {
       const result=await this.service.changePassword(user,await readJsonBody(req));
       res.setHeader('set-cookie',sessionCookie('',0));
       return sendJson(res,200,result);
     }
 
-    const business=this.service.authorizeBusiness(user,Number(req.headers['x-business-id'])),context={user,business};
-    if(path==='/api/business'&&method==='PATCH')return sendJson(res,200,this.service.updateBusiness(context,await readJsonBody(req)));
+    const business=await this.service.authorizeBusiness(user,Number(req.headers['x-business-id'])),context={user,business};
+    if(path==='/api/business'&&method==='PATCH')return sendJson(res,200,await this.service.updateBusiness(context,await readJsonBody(req)));
 
-    if(path==='/api/customers'&&method==='GET')return sendJson(res,200,this.service.listCustomers(context));
-    if(path==='/api/customers'&&method==='POST')return sendJson(res,201,this.service.createCustomer(context,await readJsonBody(req)));
+    if(path==='/api/customers'&&method==='GET')return sendJson(res,200,await this.service.listCustomers(context));
+    if(path==='/api/customers'&&method==='POST')return sendJson(res,201,await this.service.createCustomer(context,await readJsonBody(req)));
     let match=path.match(/^\/api\/customers\/(\d+)$/);
-    if(match&&method==='PATCH')return sendJson(res,200,this.service.updateCustomer(context,Number(match[1]),await readJsonBody(req)));
+    if(match&&method==='PATCH')return sendJson(res,200,await this.service.updateCustomer(context,Number(match[1]),await readJsonBody(req)));
 
-    if(path==='/api/catalog'&&method==='GET')return sendJson(res,200,this.service.listCatalog(context));
-    if(path==='/api/catalog'&&method==='POST')return sendJson(res,201,this.service.createCatalogItem(context,await readJsonBody(req)));
+    if(path==='/api/catalog'&&method==='GET')return sendJson(res,200,await this.service.listCatalog(context));
+    if(path==='/api/catalog'&&method==='POST')return sendJson(res,201,await this.service.createCatalogItem(context,await readJsonBody(req)));
     match=path.match(/^\/api\/catalog\/(\d+)\/history-impact$/);
-    if(match&&method==='GET')return sendJson(res,200,this.service.catalogHistoryImpact(context,Number(match[1]),String(url.searchParams.get('start')||''),String(url.searchParams.get('end')||'')));
+    if(match&&method==='GET')return sendJson(res,200,await this.service.catalogHistoryImpact(context,Number(match[1]),String(url.searchParams.get('start')||''),String(url.searchParams.get('end')||'')));
     match=path.match(/^\/api\/catalog\/(\d+)$/);
-    if(match&&method==='PATCH')return sendJson(res,200,this.service.updateCatalogItem(context,Number(match[1]),await readJsonBody(req)));
-    if(match&&method==='DELETE')return sendJson(res,200,this.service.deactivateCatalogItem(context,Number(match[1])));
+    if(match&&method==='PATCH')return sendJson(res,200,await this.service.updateCatalogItem(context,Number(match[1]),await readJsonBody(req)));
+    if(match&&method==='DELETE')return sendJson(res,200,await this.service.deactivateCatalogItem(context,Number(match[1])));
 
-    if(path==='/api/employees'&&method==='GET')return sendJson(res,200,this.service.listEmployees(context));
+    if(path==='/api/employees'&&method==='GET')return sendJson(res,200,await this.service.listEmployees(context));
     if(path==='/api/employees'&&method==='POST')return sendJson(res,201,await this.service.addEmployee(context,await readJsonBody(req)));
-    if(/^\/api\/employees\/\d+\/password$/.test(path)&&method==='PATCH')return this.service.rejectEmployeePasswordReset();
+    if(/^\/api\/employees\/\d+\/password$/.test(path)&&method==='PATCH')return await this.service.rejectEmployeePasswordReset();
 
-    if(path==='/api/sales'&&method==='GET')return sendJson(res,200,this.service.listSales(context));
-    if(path==='/api/sales'&&method==='POST')return sendJson(res,201,this.service.createSale(context,await readJsonBody(req)));
+    if(path==='/api/sales'&&method==='GET')return sendJson(res,200,await this.service.listSales(context));
+    if(path==='/api/sales'&&method==='POST')return sendJson(res,201,await this.service.createSale(context,await readJsonBody(req)));
     match=path.match(/^\/api\/sales\/(\d+)\/void$/);
-    if(match&&method==='POST')return sendJson(res,200,this.service.voidSale(context,Number(match[1]),await readJsonBody(req)));
+    if(match&&method==='POST')return sendJson(res,200,await this.service.voidSale(context,Number(match[1]),await readJsonBody(req)));
     match=path.match(/^\/api\/sales\/(\d+)$/);
-    if(match&&method==='GET')return sendJson(res,200,this.service.getSale(context,Number(match[1])));
-    if(match&&method==='PATCH')return sendJson(res,200,this.service.updateSale(context,Number(match[1]),await readJsonBody(req)));
+    if(match&&method==='GET')return sendJson(res,200,await this.service.getSale(context,Number(match[1])));
+    if(match&&method==='PATCH')return sendJson(res,200,await this.service.updateSale(context,Number(match[1]),await readJsonBody(req)));
 
-    if(path==='/api/audit'&&method==='GET')return sendJson(res,200,this.service.listAudit(context));
-    if(path==='/api/dashboard'&&method==='GET')return sendJson(res,200,this.service.dashboard(context,url.searchParams.get('start'),url.searchParams.get('end')));
+    if(path==='/api/audit'&&method==='GET')return sendJson(res,200,await this.service.listAudit(context));
+    if(path==='/api/dashboard'&&method==='GET')return sendJson(res,200,await this.service.dashboard(context,url.searchParams.get('start'),url.searchParams.get('end')));
     throw notFound('No encontrado.');
   }
 

@@ -4,15 +4,25 @@ MVP web para registrar servicios y productos, organizar el equipo y consultar la
 
 ## Requisitos y puesta en marcha
 
-- Node.js 22.5 o superior (usa SQLite integrado en Node; no requiere instalar paquetes).
-- Ejecutá `npm start` y abrí `http://localhost:8081`.
+- Node.js 22.9 o superior y MySQL 8.0.
+- Ejecutá `npm install`, configurá MySQL como se indica abajo y luego `npm start`. Abrí `http://localhost:8081`.
 - Para desarrollo con reinicio automático: `npm run dev`.
 - Para ejecutar la suite end-to-end: `npm test`.
 - El puerto predeterminado es `8081`; podés cambiarlo con la variable `PORT`.
 
 El servidor escribe logs JSON en la terminal. Cada solicitud API incluye un `request_id`, método, ruta, estado y duración; ante errores internos también registra el código y mensaje técnico. No registra contraseñas ni emails.
 
-La base `resolvemesto.sqlite` se crea automáticamente en el directorio del proyecto. Si ya existe una base `barberia.sqlite`, la aplicación sigue usándola para conservar los datos. También podés indicar la ubicación con `DB_PATH`. Conservá ese archivo para guardar los datos y respaldalo periódicamente. En un despliegue, montá almacenamiento persistente para la base y mantené el proceso en una sola instancia.
+Creá una base MySQL y un usuario con permisos sobre ella:
+
+```sql
+CREATE DATABASE resolvemesto CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'resolvemesto'@'127.0.0.1' IDENTIFIED BY 'una_clave_segura';
+GRANT ALL PRIVILEGES ON resolvemesto.* TO 'resolvemesto'@'127.0.0.1';
+```
+
+Copiá `.env.example` a `.env` y completá `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD`. También se admite `DB_SOCKET` para una conexión por socket Unix. Las variables del entorno tienen prioridad sobre `.env`. La aplicación crea las tablas faltantes al iniciar; la base y el usuario deben existir previamente. Conservá respaldos periódicos de MySQL.
+
+Para trasladar una base SQLite existente a una base MySQL vacía, ejecutá `npm run migrate:sqlite -- ruta/a/barberia.sqlite`. El importador conserva IDs y datos, verifica los totales por tabla y deja el archivo SQLite intacto. Si MySQL ya contiene registros, se detiene antes de importar.
 
 ## Primer uso
 
@@ -48,7 +58,7 @@ El registro de productos no administra inventario. El MVP tampoco incluye proces
 - Las cookies de sesión son HTTP-only y SameSite Strict; en producción también se marcan Secure.
 - La API aplica headers defensivos, validación de origen y límites de tamaño.
 
-La suite usa una base SQLite temporal y cubre alta de negocio, emails normalizados, usuario independiente y vinculación, permisos por rol, creación/edición/anulación de ventas, auditoría, rate limiting, invalidación de sesiones y aislamiento entre negocios.
+La suite crea y elimina bases MySQL temporales. Configurá `TEST_DB_USER` y `TEST_DB_PASSWORD` en `.env.test` con un usuario autorizado para crear y borrar esas bases; si usás socket, configurá `TEST_DB_SOCKET`. Cubre alta de negocio, emails normalizados, usuario independiente y vinculación, permisos por rol, creación/edición/anulación de ventas, auditoría, rate limiting, invalidación de sesiones y aislamiento entre negocios.
 
 ## Arquitectura
 
@@ -58,7 +68,8 @@ El backend está separado por responsabilidad:
 - `src/handler.js`: routing HTTP, lectura de requests, cookies y códigos de respuesta.
 - `src/service.js`: validaciones, permisos, reglas de negocio y transacciones.
 - `src/repository.js`: único punto de acceso SQL y mapeo de datos.
-- `src/database.js`: creación y migraciones de SQLite.
+- `src/database.js`: conexión, esquema y transacciones MySQL.
+- `scripts/migrate-sqlite.js`: importación de datos SQLite existentes.
 - `src/security.js`: hashing de contraseñas y tokens de sesión.
 
 El flujo de dependencias es unidireccional: `handler → service → repository`. El service y el repository no conocen objetos HTTP.

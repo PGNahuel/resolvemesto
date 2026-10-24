@@ -1,23 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import mysql from 'mysql2/promise';
 
 const projectRoot=resolve(import.meta.dirname,'..');
 
 async function startServer() {
-  const directory=await mkdtemp(join(tmpdir(),'resolvemesto-e2e-'));
-  const child=spawn(process.execPath,['server.js'],{cwd:projectRoot,env:{...process.env,PORT:'0',DB_PATH:join(directory,'test.sqlite')},stdio:['ignore','pipe','pipe']});
+  const database=`resolvemesto_test_${randomUUID().replaceAll('-','')}`;
+  const admin=await mysql.createConnection({
+    ...(process.env.TEST_DB_SOCKET?{socketPath:process.env.TEST_DB_SOCKET}:{host:process.env.TEST_DB_HOST||'127.0.0.1',port:Number(process.env.TEST_DB_PORT||3306)}),
+    user:process.env.TEST_DB_USER||'root',password:process.env.TEST_DB_PASSWORD||''
+  });
+  await admin.query(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+  const childEnv={...process.env,PORT:'0',DB_NAME:database,DB_HOST:process.env.TEST_DB_HOST||'127.0.0.1',DB_PORT:process.env.TEST_DB_PORT||'3306',DB_USER:process.env.TEST_DB_USER||'root',DB_PASSWORD:process.env.TEST_DB_PASSWORD||'',DB_SOCKET:process.env.TEST_DB_SOCKET||''};
+  for(const key of Object.keys(childEnv))if(key.startsWith('TEST_DB_'))delete childEnv[key];
+  const child=spawn(process.execPath,['server.js'],{cwd:projectRoot,env:childEnv,stdio:['ignore','pipe','pipe']});
+  let output='';
   const url=await new Promise((resolveUrl,reject)=>{
-    let output='';
     const timer=setTimeout(()=>reject(new Error(`El servidor no inició. ${output}`)),10_000);
     child.stdout.on('data',chunk=>{ output+=chunk; for(const line of output.split('\n')) { try { const event=JSON.parse(line); if(event.event==='server_started') { clearTimeout(timer); resolveUrl(event.url); } } catch {} } });
     child.stderr.on('data',chunk=>{ output+=chunk; });
     child.once('exit',code=>{ clearTimeout(timer); reject(new Error(`El servidor terminó con código ${code}. ${output}`)); });
   });
-  return {url,directory,child};
+  return {url,child,logs:()=>output,async cleanup() { child.kill('SIGTERM'); await new Promise(resolve=>child.once('exit',resolve)); await admin.query(`DROP DATABASE \`${database}\``); await admin.end(); }};
 }
 
 function client(baseUrl) {
@@ -41,7 +48,7 @@ async function registerAdmin(api,{name,email,password,business}) {
 
 test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',async t=>{
   const server=await startServer();
-  t.after(async()=>{ server.child.kill('SIGTERM'); await new Promise(resolve=>server.child.once('exit',resolve)); await rm(server.directory,{recursive:true,force:true}); });
+  t.after(()=>server.cleanup());
   const manifestResponse=await fetch(`${server.url}/manifest.webmanifest?page=customers`);
   const manifest=await manifestResponse.json();
   assert.equal(manifestResponse.headers.get('content-type'),'application/manifest+json; charset=utf-8');
@@ -86,6 +93,7 @@ test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',asy
   const ownDetail=await employee.request(`/api/sales/${ownSale.data.id}`,{businessId:business.id});
   assert.equal(ownDetail.data.payment_method,'cash'); assert.equal(ownDetail.data.discount,1000);
   const employeeDashboard=await employee.request('/api/dashboard',{businessId:business.id});
+  assert.equal(employeeDashboard.status,200,server.logs());
   assert.equal(employeeDashboard.data.scope,'personal');
   assert.equal(Number(employeeDashboard.data.summary.tickets),1,'el empleado solo ve sus atenciones en el resumen');
   assert.equal(Number(employeeDashboard.data.summary.revenue),23000,'el resumen personal conserva el descuento de su venta');
@@ -119,7 +127,7 @@ test('flujos críticos, permisos, trazabilidad y aislamiento entre negocios',asy
 
 test('rutas CRUD conservan sus contratos después de separar las capas',async t=>{
   const server=await startServer();
-  t.after(async()=>{ server.child.kill('SIGTERM'); await new Promise(resolve=>server.child.once('exit',resolve)); await rm(server.directory,{recursive:true,force:true}); });
+  t.after(()=>server.cleanup());
   const page=await fetch(server.url+'/'); assert.equal(page.status,200); assert.match(await page.text(),/<title>Resolvemesto/);
   const admin=client(server.url),business=await registerAdmin(admin,{name:'Admin CRUD',email:'crud@example.com',password:'CrudSeguro!2026',business:'Nombre inicial'});
 
