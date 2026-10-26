@@ -11,10 +11,14 @@ export function sendJson(res,status,payload) {
 }
 
 export class Handler {
-  constructor(service,publicDirectory) { this.service=service; this.publicDirectory=publicDirectory; }
+  constructor(service,publicDirectory,healthCheck) { this.service=service; this.publicDirectory=publicDirectory; this.healthCheck=healthCheck; }
 
   async handle(req,res) {
     const url=new URL(req.url,'http://localhost'),path=url.pathname,method=req.method;
+    if(method==='GET'&&path==='/healthz') {
+      try { await this.healthCheck(); return sendJson(res,200,{status:'ok'}); }
+      catch { return sendJson(res,503,{status:'unavailable'}); }
+    }
     if(method==='GET'&&path==='/manifest.webmanifest') {
       const page=Object.hasOwn(installPages,url.searchParams.get('page'))?url.searchParams.get('page'):'home';
       const manifest={id:`/resolvemesto-${page}`,name:`Resolvemesto · ${installPages[page]}`,short_name:`Resolvemesto ${installPages[page]}`,start_url:`/#/${page}`,scope:'/',display:'standalone',background_color:'#f6f5f2',theme_color:'#31493d',icons:[{src:'/icon-192.png',sizes:'192x192',type:'image/png'},{src:'/icon-512.png',sizes:'512x512',type:'image/png'}]};

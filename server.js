@@ -11,7 +11,7 @@ const database=createDatabase();
 await database.initialize();
 const repository=new Repository(database);
 const service=new Service(repository);
-const handler=new Handler(service,join(root,'public'));
+const handler=new Handler(service,join(root,'public'),()=>database.health());
 
 function log(event,details={}) { console.log(JSON.stringify({time:new Date().toISOString(),event,...details})); }
 function allowedOrigin(req) { if(!req.headers.origin||!req.headers.host)return true; try { return new URL(req.headers.origin).host===req.headers.host; } catch { return false; } }

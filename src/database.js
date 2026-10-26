@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { readFileSync } from 'node:fs';
 
 const schema=[
   `CREATE TABLE IF NOT EXISTS users (
@@ -74,10 +75,15 @@ const schema=[
   )`
 ];
 
+function environmentSecret(name) {
+  const path=process.env[`${name}_FILE`];
+  return path ? readFileSync(path,'utf8').trimEnd() : process.env[name]||'';
+}
+
 export function createDatabase(config={}) {
   const pool=mysql.createPool({
     host:process.env.DB_HOST||'127.0.0.1', port:Number(process.env.DB_PORT||3306),
-    user:process.env.DB_USER||'resolvemesto', password:process.env.DB_PASSWORD||'',
+    user:process.env.DB_USER||'resolvemesto', password:environmentSecret('DB_PASSWORD'),
     database:process.env.DB_NAME||'resolvemesto',
     ...(process.env.DB_SOCKET?{socketPath:process.env.DB_SOCKET}:{}),
     waitForConnections:true, connectionLimit:10, dateStrings:true, decimalNumbers:true,
@@ -103,6 +109,9 @@ export function createDatabase(config={}) {
   return {
     async initialize() {
       for(const statement of schema)await pool.query(statement);
+    },
+    async health() {
+      await execute('SELECT 1');
     },
     prepare(sql) {
       return {
